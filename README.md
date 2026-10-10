@@ -1,5 +1,7 @@
 # baugbaunty
 
+[![CI](https://github.com/Ebu51/baugbaunty/actions/workflows/ci.yml/badge.svg)](https://github.com/Ebu51/baugbaunty/actions/workflows/ci.yml)
+
 **Scope-first bug bounty reconnaissance toolkit for _authorized_ security testing.**
 
 A modular recon + light-testing framework built the way a professional bounty
@@ -77,6 +79,9 @@ python -m baugbaunty run -c acme.json --authorize
 
 # 6. Regenerate reports in another format anytime
 python -m baugbaunty report -c acme.json --formats html markdown
+
+# 7. Draft platform-ready submissions for the serious findings
+python -m baugbaunty submission -c acme.json --platform hackerone --min-severity high
 ```
 
 You can also skip the config file for a quick pass:
@@ -92,11 +97,104 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | Phase        | Traffic to target? | What it does | Powered by |
 |--------------|:---:|--------------|------------|
 | `subdomains` | ❌ passive | Certificate-transparency (crt.sh) + aggregated passive sources | built-in / `subfinder` |
+| `wayback`    | ❌ passive | Historical URL mining from Wayback Machine + AlienVault OTX; flags interesting archived URLs | built-in |
+| `githubdork` | ❌ passive | Searches GitHub code for leaked references to the target (repo+path leads, no secret values) | built-in (token) |
+| `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
+| `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (40+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
-| `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration; flags sensitive paths | built-in |
+| `waf`        | ✅ active | Fingerprints the WAF in front of each service (Cloudflare, Akamai, Imperva, AWS, F5, ModSecurity…) | built-in |
+| `seeds`      | ✅ active | Seeds paths from robots.txt & sitemap.xml; captures favicon hashes (mmh3/md5) | built-in |
+| `vhost`      | ✅ active | Virtual-host discovery — finds sites served on an in-scope IP via the Host header | built-in |
+| `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
+| `graphql`    | ✅ active | Finds GraphQL endpoints and flags when **introspection** is enabled (schema disclosure) | built-in |
+| `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration, **recursion** and **extension permutation**; flags sensitive paths | built-in |
+| `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
+| `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection / **CRLF** / **host-header injection** / **SSRF canary** checks | built-in |
+| `cvecheck`   | ❌ passive² | Correlates disclosed versions with a curated known-CVE ruleset + optional **OSV** online enrichment | built-in |
+| `screenshot` | ✅ active | Visual triage screenshots of live services | Playwright / `gowitness` |
 | `ports`      | ✅ active | Open-port discovery | built-in / `naabu` |
-| `nuclei`     | ✅ active | Template-based vulnerability checks | `nuclei` |
-| _report_     | — | JSON + Markdown + self-contained HTML | always runs |
+| `nuclei`     | ✅ active | Template-based vuln checks with **custom templates**, **tag filters**, **auto-update** and enriched output (CVE/CWE/CVSS) | `nuclei` |
+| _report_     | — | JSON + Markdown + self-contained HTML, plus an end-of-run per-phase summary table | always runs |
+
+¹ DNS resolution queries public/authoritative resolvers, not the target's web
+app, so it is treated as non-intrusive recon and doesn't require the auth gate.
+² `cvecheck` only analyses data already collected by `probe`; it sends no new
+traffic. `githubdork` queries GitHub, not the target.
+
+### Importing program scope
+
+Stop hand-copying scope. Point `import` at a HackerOne/Bugcrowd scope export (or
+a plain list) and it builds a config with include/exclude filled in and
+non-web assets dropped:
+
+```bash
+baugbaunty import -f hackerone-scope.json -n acme -o acme.json
+# plain list: one asset per line, a leading ! marks out-of-scope
+baugbaunty import -f scope.txt --platform list -o acme.json
+```
+
+### Scan profiles
+
+```bash
+baugbaunty run -c acme.json --authorize --profile quiet       # slow, passive-leaning
+baugbaunty run -c acme.json --authorize --profile aggressive  # fast, full pipeline
+```
+
+`quiet` (3 rps, discovery + cvecheck), `normal`, `aggressive` (25 rps, everything).
+Explicit `--phases` / `--rps` always override the profile.
+
+### GitHub dorking
+
+Set a token (`modules.githubdork.token` or the `GITHUB_TOKEN` env var) to enable
+leaked-reference search; without one the phase skips cleanly.
+
+### Advanced tuning
+
+```json
+"modules": {
+  "content":  { "recurse": true, "max_depth": 2,
+                "permute_ext": [".php", ".bak", ".json", ".old", ".zip"] },
+  "webchecks":{ "checks": ["cors","openredirect","reflection","crlf","hostheader","ssrf"],
+                "ssrf_canary": "YOUR-ID.oast.live" },
+  "cvecheck": { "online": true },
+  "nuclei":   { "templates": "/path/to/custom-templates", "tags": ["cve","exposure"],
+                "update": true }
+}
+```
+
+- **content**: `recurse` descends into discovered directories (bounded by
+  `max_depth`); `permute_ext` appends each extension to every word.
+- **webchecks SSRF**: set `ssrf_canary` to your out-of-band collaborator
+  (Interactsh/Burp Collaborator). Probes are sent with a unique subdomain per
+  parameter — a hit in your canary logs confirms SSRF. Blank disables it.
+- **cvecheck online**: enriches detected JS libraries against OSV.dev.
+- **nuclei**: point at custom templates, filter by tag, auto-update the corpus.
+
+### Continuous monitoring (`monitor`)
+
+`monitor` runs the pipeline, then reports (and optionally pushes a notification
+for) everything **new since the last run** — perfect for a cron job that alerts
+you the moment a target exposes a new subdomain or service:
+
+```bash
+# cheap change-detection every few hours
+baugbaunty monitor -c acme.json --authorize --phases subdomains dns probe
+```
+
+Configure alerts under `notifications` in your config (Slack / Discord /
+Telegram / generic webhook), with a `min_severity` filter:
+
+```json
+"notifications": {
+  "enabled": true,
+  "slack_webhook": "https://hooks.slack.com/services/...",
+  "telegram_bot_token": "", "telegram_chat_id": "",
+  "min_severity": "medium"
+}
+```
+
+A per-program run checkpoint is stored in the results DB, so diffs are accurate
+across runs and the first run never spams you with everything at once.
 
 Everything discovered is stored in a per-program SQLite database
 (`output/<program>.sqlite`) so runs are **resumable, de-duplicated and
@@ -116,7 +214,10 @@ baugbaunty/
 │   ├── store.py       SQLite result store (assets/services/findings)
 │   └── logging.py     tiny structured logger
 ├── modules/         # one file per pipeline phase
-│   ├── subdomains.py  probe.py  content.py  ports.py  nuclei.py
+│   ├── subdomains.py  wayback.py  dns.py  takeover.py
+│   ├── probe.py  waf.py  seeds.py  vhost.py  jsintel.py
+│   ├── graphql.py  content.py  params.py  webchecks.py
+│   ├── cvecheck.py  githubdork.py  screenshot.py  ports.py  nuclei.py
 │   └── fingerprint.py tech detection signatures
 ├── integrations/    # safe argv-only wrappers for external CLIs
 ├── report/          # JSON / Markdown / HTML renderers
@@ -155,16 +256,64 @@ pytest -q
 
 ---
 
+## Use with Claude (MCP server)
+
+baugbaunty ships a dependency-free **MCP server** so Claude (Claude Code or
+Claude Desktop) can drive the toolkit as tools — run recon and reason over
+findings conversationally, with the same scope, rate-limit and authorization
+guardrails. See [`CLAUDE.md`](CLAUDE.md) for the safe-use rules Claude follows.
+
+Start it manually with `baugbaunty mcp` (or `python -m baugbaunty mcp`); it
+speaks MCP over stdio.
+
+**Claude Code** — a project [`.mcp.json`](.mcp.json) is already included:
+
+```json
+{ "mcpServers": { "baugbaunty": { "command": "python", "args": ["-m", "baugbaunty", "mcp"] } } }
+```
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "baugbaunty": { "command": "python", "args": ["-m", "baugbaunty", "mcp"] }
+  }
+}
+```
+
+Tools exposed: `scope_check`, `import_scope`, `tools_status` (safe/planning);
+`summary`, `list_findings`, `list_assets`, `read_report` (read an existing
+results DB); `generate_report`, `generate_submission` (produce reports and
+platform-ready submission drafts); and `run` (executes phases — active phases
+are refused unless the config is `authorized`, exactly as on the CLI). Example
+asks:
+
+> "Import this HackerOne scope, check example.com is in scope, then run the
+> passive phases and show me the findings by severity."
+
+> "Draft HackerOne submissions for the high/critical findings so I can review."
+
+## Proxy / Burp passthrough
+
+Route every request through Burp or mitmproxy for manual inspection and replay:
+
+```json
+"http": { "proxy": "http://127.0.0.1:8080", "verify_tls": false }
+```
+
 ## Roadmap
 
-Planned next modules (the structure is ready for them):
+Shipped (Tier 1): DNS resolution + wildcard filtering, subdomain-takeover
+detection, historical-URL mining, JS endpoint/secret extraction, diff/monitor
+mode with notifications.
 
-- `dns` bruteforce + wildcard detection (via `dnsx`)
-- JS endpoint/secret extraction from live services
-- Parameter discovery and reflected-value detection
-- Screenshotting live hosts for triage
-- Program-import helpers (HackerOne / Bugcrowd scope pulls)
-- Diff mode: alert on new assets/services since the last run
+Shipped (Tier 2): hidden-parameter discovery, safe CORS/open-redirect/
+reflection checks, virtual-host discovery, robots/sitemap seeding +
+favicon-hash correlation, and Burp/mitmproxy passthrough.
+
+Shipped (Tier 3): HackerOne/Bugcrowd scope import, GitHub dorking, CVE
+correlation, screenshotting, and preset scan profiles.
 
 ---
 

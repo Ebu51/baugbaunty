@@ -43,12 +43,59 @@ DEFAULTS: dict[str, Any] = {
         "verify_tls": True,
         "follow_redirects": True,
         "extra_headers": {},
+        "proxy": "",  # e.g. http://127.0.0.1:8080 to route through Burp/mitmproxy
     },
     "modules": {
         "subdomains": {"sources": ["crtsh"], "use_external": True},
-        "content": {"wordlist": "", "extensions": ["", "/"], "status_allow": [200, 204, 301, 302, 307, 401, 403, 405]},
+        "dns": {
+            "use_external": True,
+            "detect_wildcard": True,
+            "filter_wildcard": True,
+            "wildcard_test_count": 3,
+        },
+        "takeover": {"extra": ""},  # path to a JSON file of extra fingerprints
+        "wayback": {"sources": ["wayback", "otx"], "max_urls": 5000},
+        "jsintel": {"max_files": 200, "scan_secrets": True},
+        "seeds": {"favicon": True},  # robots/sitemap/favicon seeding
+        "waf": {},
+        "graphql": {},
+        "vhost": {"wordlist": "", "max_hosts": 300},
+        "params": {"wordlist": "", "chunk_size": 25, "max_params": 500},
+        "webchecks": {
+            "checks": ["cors", "openredirect", "reflection", "crlf", "hostheader", "ssrf"],
+            "max_targets": 300,
+            "ssrf_canary": "",  # your OOB collaborator/interactsh domain; blank disables SSRF
+        },
+        "cvecheck": {"extra": "", "online": False},  # online = OSV enrichment
+        "githubdork": {"token": "", "terms": [], "max_results": 20},
+        "screenshot": {},
+        "content": {
+            "wordlist": "",
+            "extensions": ["", "/"],
+            "permute_ext": [],  # e.g. [".php", ".bak", ".json", ".old", ".zip"]
+            "recurse": False,
+            "max_depth": 1,
+            "status_allow": [200, 204, 301, 302, 307, 401, 403, 405],
+        },
         "ports": {"top_ports": 100, "use_external": True},
-        "nuclei": {"severity": ["low", "medium", "high", "critical"], "rate_limit": 150},
+        "nuclei": {
+            "severity": ["low", "medium", "high", "critical"],
+            "rate_limit": 150,
+            "templates": "",          # path to a custom template dir
+            "tags": [],               # e.g. ["cve", "exposure"]
+            "exclude_severity": [],
+            "update": False,          # run -update-templates before scanning
+            "extra_args": [],
+        },
+    },
+    "notifications": {
+        "enabled": False,
+        "slack_webhook": "",
+        "discord_webhook": "",
+        "telegram_bot_token": "",
+        "telegram_chat_id": "",
+        "generic_webhook": "",
+        "min_severity": "medium",  # only alert on findings at/above this severity
     },
     "output": {
         "dir": "output",

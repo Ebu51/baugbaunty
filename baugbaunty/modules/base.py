@@ -44,6 +44,7 @@ class Context:
             follow_redirects=bool(config.get("http.follow_redirects", True)),
             max_retries=int(config.get("limits.max_retries", 2)),
             extra_headers=config.get("http.extra_headers", {}) or {},
+            proxy=config.get("http.proxy", "") or "",
         )
         return cls(
             config=config,

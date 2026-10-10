@@ -4,21 +4,37 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
 from .core.config import DEFAULTS, Config
 from .core.logging import configure
+from .core.notify import Notifier
 from .core.scope import Scope
 from .core.store import Store
 from .integrations import external
 from .modules.base import Context
+from .integrations import programs
 from .modules.content import ContentModule
+from .modules.cvecheck import CveCheckModule
+from .modules.dns import DnsModule
+from .modules.githubdork import GithubDorkModule
+from .modules.graphql import GraphqlModule
+from .modules.jsintel import JsIntelModule
 from .modules.nuclei import NucleiModule
+from .modules.params import ParamsModule
 from .modules.ports import PortsModule
 from .modules.probe import ProbeModule
+from .modules.screenshot import ScreenshotModule
+from .modules.seeds import SeedsModule
 from .modules.subdomains import SubdomainModule
-from .report import generate_reports
+from .modules.takeover import TakeoverModule
+from .modules.vhost import VhostModule
+from .modules.waf import WafModule
+from .modules.wayback import WaybackModule
+from .modules.webchecks import WebChecksModule
+from .report import generate_reports, generate_submissions
 
 BANNER = r"""
   _                      _                     _
@@ -31,8 +47,47 @@ BANNER = r"""
 """.format(ver=__version__)
 
 # Ordered phases of the default pipeline.
-PHASES = ["subdomains", "probe", "content", "ports", "nuclei"]
-ACTIVE_PHASES = {"probe", "content", "ports", "nuclei"}  # send traffic to target
+PHASES = [
+    "subdomains",  # passive OSINT
+    "wayback",     # passive archive mining
+    "githubdork",  # passive GitHub leak search
+    "dns",         # resolution + wildcard filtering (non-intrusive)
+    "takeover",    # subdomain takeover detection (active)
+    "probe",       # live HTTP probing + fingerprint (active)
+    "waf",         # WAF detection (active)
+    "seeds",       # robots/sitemap/favicon seeding (active)
+    "vhost",       # virtual-host discovery (active)
+    "jsintel",     # JS endpoint + secret extraction (active)
+    "graphql",     # GraphQL discovery + introspection (active)
+    "content",     # content discovery (active)
+    "params",      # hidden parameter discovery (active)
+    "webchecks",   # CORS / open redirect / reflection (active)
+    "cvecheck",    # version -> known-CVE correlation (analysis, no traffic)
+    "screenshot",  # visual triage of live services (active)
+    "ports",       # port scanning (active)
+    "nuclei",      # template vuln scan (active)
+]
+# Phases that send traffic to the target (require authorization).
+ACTIVE_PHASES = {
+    "takeover", "probe", "waf", "seeds", "vhost", "jsintel", "graphql",
+    "content", "params", "webchecks", "screenshot", "ports", "nuclei",
+}
+
+# Preset scan profiles: politeness + which phases to run by default.
+PROFILES: dict[str, dict] = {
+    "quiet": {
+        "limits": {"global_rps": 3.0, "per_host_rps": 1.5, "concurrency": 8},
+        "phases": ["subdomains", "wayback", "dns", "probe", "seeds", "cvecheck"],
+    },
+    "normal": {
+        "limits": {"global_rps": 10.0, "per_host_rps": 5.0, "concurrency": 20},
+        "phases": PHASES,
+    },
+    "aggressive": {
+        "limits": {"global_rps": 25.0, "per_host_rps": 10.0, "concurrency": 40},
+        "phases": PHASES,
+    },
+}
 
 
 def _build_context(cfg: Config, log) -> tuple[Context, Store]:
@@ -119,6 +174,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(BANNER)
     cfg = Config.load(args.config)
 
+    # Apply a preset profile first, so explicit flags still override it.
+    profile_phases: list[str] | None = None
+    if getattr(args, "profile", None):
+        prof = PROFILES.get(args.profile)
+        if not prof:
+            log.error(f"Unknown profile '{args.profile}'. Valid: {', '.join(PROFILES)}")
+            return 1
+        for k, v in prof.get("limits", {}).items():
+            cfg.set(f"limits.{k}", v)
+        profile_phases = list(prof.get("phases", []))
+        log.info(f"Profile '{args.profile}' applied")
+
     # CLI overrides for scope and limits.
     if args.domain:
         inc = cfg.get("scope.include", []) or []
@@ -138,7 +205,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         log.error("No scope defined. Use --domain or set scope.include in config.")
         return 1
 
-    phases = args.phases or PHASES
+    phases = args.phases or profile_phases or PHASES
     bad = [p for p in phases if p not in PHASES]
     if bad:
         log.error(f"Unknown phase(s): {', '.join(bad)}. Valid: {', '.join(PHASES)}")
@@ -153,6 +220,8 @@ def cmd_run(args: argparse.Namespace) -> int:
              f"{cfg.get('limits.per_host_rps')} req/s per host")
 
     ctx, store = _build_context(cfg, log)
+    # Remember the previous run's checkpoint so we can diff/notify new results.
+    prev_run = float(store.get_meta("last_run_ts", "0") or 0)
     try:
         # Seed in-scope root domains as assets.
         for rule in cfg.get("scope.include", []):
@@ -160,28 +229,157 @@ def cmd_run(args: argparse.Namespace) -> int:
             store.add_asset(root, "domain", source="scope", in_scope=scope.is_allowed(root))
 
         domains = [r.lstrip("*.") for r in cfg.get("scope.include", [])]
+        dispatch = {
+            "subdomains": lambda: SubdomainModule(domains).run(ctx),
+            "wayback": lambda: WaybackModule(domains).run(ctx),
+            "dns": lambda: DnsModule().run(ctx),
+            "githubdork": lambda: GithubDorkModule(domains).run(ctx),
+            "takeover": lambda: TakeoverModule().run(ctx),
+            "probe": lambda: ProbeModule().run(ctx),
+            "waf": lambda: WafModule().run(ctx),
+            "seeds": lambda: SeedsModule().run(ctx),
+            "vhost": lambda: VhostModule().run(ctx),
+            "jsintel": lambda: JsIntelModule().run(ctx),
+            "graphql": lambda: GraphqlModule().run(ctx),
+            "content": lambda: ContentModule().run(ctx),
+            "params": lambda: ParamsModule().run(ctx),
+            "webchecks": lambda: WebChecksModule().run(ctx),
+            "cvecheck": lambda: CveCheckModule().run(ctx),
+            "screenshot": lambda: ScreenshotModule().run(ctx),
+            "ports": lambda: PortsModule().run(ctx),
+            "nuclei": lambda: NucleiModule().run(ctx),
+        }
         results: dict[str, dict] = {}
-
-        if "subdomains" in phases:
-            results["subdomains"] = SubdomainModule(domains).run(ctx)
-        if "probe" in phases:
-            results["probe"] = ProbeModule().run(ctx)
-        if "content" in phases:
-            results["content"] = ContentModule().run(ctx)
-        if "ports" in phases:
-            results["ports"] = PortsModule().run(ctx)
-        if "nuclei" in phases:
-            results["nuclei"] = NucleiModule().run(ctx)
+        durations: dict[str, float] = {}
+        ordered = [p for p in PHASES if p in phases]
+        for idx, phase in enumerate(ordered, 1):
+            log.info(f"[{idx}/{len(ordered)}] ▶ {phase}")
+            t0 = time.time()
+            results[phase] = dispatch[phase]()
+            durations[phase] = time.time() - t0
 
         # Always produce a report at the end of a run.
         reports = generate_reports(store, cfg, cfg.get("output.dir", "output"))
-        counts = store.counts()
-        log.success(
-            f"Done. {counts['assets']} assets, {counts['services']} services, "
-            f"{counts['findings']} findings."
-        )
+        _print_summary(log, results, durations, store)
         for r in reports:
             log.success(f"Report: {r}")
+
+        # Diff vs the previous run + notifications (monitor mode).
+        diff = store.new_since(prev_run)
+        _report_diff(diff, log, first_run=prev_run == 0)
+        notifier = Notifier.from_config(cfg.get("notifications", {}))
+        notifier.log = log
+        if notifier.enabled and prev_run > 0:
+            notifier.send_diff(cfg.get("program.name", "engagement"), diff)
+        store.set_meta("last_run_ts", str(time.time()))
+    finally:
+        store.close()
+    return 0
+
+
+def _print_summary(log, results: dict, durations: dict, store) -> None:
+    """Print a per-phase table and a findings-by-severity breakdown."""
+
+    print("\n  Phase        Result                                   Time", file=sys.stderr)
+    print("  " + "-" * 64, file=sys.stderr)
+    for phase, res in results.items():
+        metrics = ", ".join(
+            f"{k}={v}" for k, v in res.items()
+            if isinstance(v, (int, float, bool, str)) and k != "by_severity"
+        )
+        dur = durations.get(phase, 0.0)
+        print(f"  {phase:<12} {metrics[:40]:<40} {dur:6.1f}s", file=sys.stderr)
+    print("  " + "-" * 64, file=sys.stderr)
+
+    # Findings by severity.
+    sev_counts: dict[str, int] = {}
+    for f in store.findings():
+        s = f.get("severity", "info")
+        sev_counts[s] = sev_counts.get(s, 0) + 1
+    order = ["critical", "high", "medium", "low", "info"]
+    sev_line = "  ".join(f"{s}:{sev_counts.get(s, 0)}" for s in order)
+    counts = store.counts()
+    log.success(
+        f"Done. {counts['assets']} assets, {counts['services']} services, "
+        f"{counts['findings']} findings  [{sev_line}]"
+    )
+
+
+def _report_diff(diff: dict, log, first_run: bool) -> None:
+    new_assets = diff.get("assets", [])
+    new_services = diff.get("services", [])
+    new_findings = diff.get("findings", [])
+    if first_run:
+        return  # nothing to compare against on the first run
+    if not (new_assets or new_services or new_findings):
+        log.info("[diff] no new assets, services or findings since last run")
+        return
+    log.success(
+        f"[diff] NEW since last run: {len(new_assets)} assets, "
+        f"{len(new_services)} services, {len(new_findings)} findings"
+    )
+    for f in new_findings[:20]:
+        log.warn(f"[diff]  + [{f.get('severity','').upper()}] {f.get('name')} "
+                 f"({f.get('target')})")
+
+
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from .mcp_server import main as mcp_main
+
+    return mcp_main()
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    import json as _json
+
+    log = configure(args.log_level)
+    text = Path(args.file).read_text(encoding="utf-8")
+    result = programs.import_scope(text, platform=args.platform)
+    if args.name:
+        result.name = args.name
+    if not result.include:
+        log.error("No in-scope web assets found. Check the file/platform.")
+        return 1
+    cfg = programs.to_config_dict(result, name=args.name)
+    out = Path(args.output)
+    if out.exists() and not args.force:
+        log.error(f"{out} exists (use --force)")
+        return 1
+    out.write_text(_json.dumps(cfg, indent=2), encoding="utf-8")
+    log.success(f"Imported {len(result.include)} in-scope, "
+                f"{len(result.exclude)} out-of-scope rule(s) -> {out}")
+    if result.skipped:
+        log.info(f"Skipped {len(result.skipped)} non-web asset(s): "
+                 f"{', '.join(result.skipped[:8])}" + (" ..." if len(result.skipped) > 8 else ""))
+    log.warn("Review the generated scope, then set program.authorized=true "
+             "before running active phases.")
+    return 0
+
+
+def cmd_monitor(args: argparse.Namespace) -> int:
+    # Monitor is a thin wrapper over run: cheaper default phases for change
+    # detection, and it leans on run's built-in diff + notifications.
+    if not args.phases and not getattr(args, "profile", None):
+        args.phases = ["subdomains", "dns", "probe"]
+    return cmd_run(args)
+
+
+def cmd_submission(args: argparse.Namespace) -> int:
+    log = configure(args.log_level)
+    cfg = Config.load(args.config)
+    out_dir = Path(cfg.get("output.dir", "output"))
+    program = cfg.get("program.name", "engagement")
+    db_path = Path(args.db) if args.db else out_dir / f"{program}.sqlite"
+    if not db_path.exists():
+        log.error(f"No database at {db_path}. Run a scan first.")
+        return 1
+    store = Store.open(db_path)
+    try:
+        path = generate_submissions(
+            store, cfg, out_dir,
+            min_severity=args.min_severity, platform=args.platform, fmt=args.format,
+        )
+        log.success(f"Submissions written: {path}")
     finally:
         store.close()
     return 0
@@ -228,6 +426,18 @@ def build_parser() -> argparse.ArgumentParser:
     pt = sub.add_parser("tools", help="show which external tools are installed")
     pt.set_defaults(func=cmd_tools)
 
+    pmcp = sub.add_parser("mcp", help="run the MCP server (stdio) for use with Claude")
+    pmcp.set_defaults(func=cmd_mcp)
+
+    pimp = sub.add_parser("import", help="build a config from a HackerOne/Bugcrowd scope file")
+    pimp.add_argument("-f", "--file", required=True, help="scope file (JSON or plain list)")
+    pimp.add_argument("--platform", default="auto",
+                      choices=["auto", "hackerone", "bugcrowd", "list"])
+    pimp.add_argument("-o", "--output", default="config.json")
+    pimp.add_argument("-n", "--name", default="", help="program name")
+    pimp.add_argument("--force", action="store_true")
+    pimp.set_defaults(func=cmd_import)
+
     ps = sub.add_parser("scope", help="check assets against the config scope")
     ps.add_argument("-c", "--config", required=True)
     ps.add_argument("assets", nargs="+")
@@ -240,9 +450,38 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--phases", nargs="+", metavar="PHASE",
                     help=f"subset of: {', '.join(PHASES)}")
     pr.add_argument("--rps", type=float, help="global requests/sec override")
+    pr.add_argument("--profile", choices=list(PROFILES), help="preset scan profile")
     pr.add_argument("--authorize", action="store_true",
                     help="confirm you are authorized to test this scope")
     pr.set_defaults(func=cmd_run)
+
+    pm = sub.add_parser(
+        "monitor",
+        help="run the pipeline and report/notify what is NEW since last run "
+             "(ideal for cron/scheduled continuous recon)",
+    )
+    pm.add_argument("-c", "--config", help="config file (json/yaml)")
+    pm.add_argument("-d", "--domain", action="append", help="add an in-scope domain")
+    pm.add_argument("-n", "--name", help="program name override")
+    pm.add_argument("--phases", nargs="+", metavar="PHASE",
+                    help=f"subset of: {', '.join(PHASES)} "
+                         "(default: subdomains dns probe for cheap change detection)")
+    pm.add_argument("--rps", type=float, help="global requests/sec override")
+    pm.add_argument("--profile", choices=list(PROFILES), help="preset scan profile")
+    pm.add_argument("--authorize", action="store_true",
+                    help="confirm you are authorized to test this scope")
+    pm.set_defaults(func=cmd_monitor)
+
+    psub = sub.add_parser("submission",
+                          help="draft platform-ready vulnerability submissions from findings")
+    psub.add_argument("-c", "--config", required=True)
+    psub.add_argument("--db", help="path to the sqlite results db")
+    psub.add_argument("--min-severity", default="medium",
+                      choices=["info", "low", "medium", "high", "critical"])
+    psub.add_argument("--platform", default="generic",
+                      choices=["generic", "hackerone", "bugcrowd"])
+    psub.add_argument("--format", default="markdown", choices=["markdown", "json"])
+    psub.set_defaults(func=cmd_submission)
 
     prep = sub.add_parser("report", help="regenerate reports from a results DB")
     prep.add_argument("-c", "--config", help="config file")

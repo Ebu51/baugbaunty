@@ -42,16 +42,35 @@ class NucleiModule(Module):
             "modules.nuclei.severity", ["low", "medium", "high", "critical"]
         )
         rate = int(ctx.config.get("modules.nuclei.rate_limit", 150))
-        ctx.log.info(f"[nuclei] scanning {len(urls)} services (severity={severities})")
+        templates = ctx.config.get("modules.nuclei.templates", "")
+        tags = ctx.config.get("modules.nuclei.tags", []) or []
+        exclude = ctx.config.get("modules.nuclei.exclude_severity", []) or []
+        extra = ctx.config.get("modules.nuclei.extra_args", []) or []
+
+        if ctx.config.get("modules.nuclei.update", False):
+            ctx.log.info("[nuclei] updating templates...")
+            res = external.nuclei_update_templates()
+            ctx.log.debug(f"[nuclei] update ok={res.ok}")
+
+        ctx.log.info(
+            f"[nuclei] scanning {len(urls)} services "
+            f"(severity={severities}{', tags=' + ','.join(tags) if tags else ''}"
+            f"{', custom templates' if templates else ''})"
+        )
 
         count = 0
-        for row in external.nuclei(urls, severities, rate_limit=rate):
+        by_sev: dict[str, int] = {}
+        for row in external.nuclei(
+            urls, severities, rate_limit=rate, templates=templates,
+            tags=tags, exclude_severities=exclude, extra_args=extra,
+        ):
             info = row.get("info", {})
             target = row.get("matched-at") or row.get("host") or row.get("url", "")
             if target and not ctx.scope.is_allowed(target):
                 continue
             name = info.get("name") or row.get("template-id", "nuclei finding")
             severity = _SEV_MAP.get(str(info.get("severity", "info")).lower(), "info")
+            classification = info.get("classification", {}) or {}
             ctx.store.add_finding(
                 target=target or "unknown",
                 module="nuclei",
@@ -60,8 +79,16 @@ class NucleiModule(Module):
                 evidence=row.get("matched-at", ""),
                 template=row.get("template-id", ""),
                 reference=info.get("reference", []),
+                tags=info.get("tags", []),
+                cve=classification.get("cve-id", []),
+                cwe=classification.get("cwe-id", []),
+                cvss=classification.get("cvss-score"),
+                matcher=row.get("matcher-name", ""),
+                extracted=row.get("extracted-results", []),
             )
+            by_sev[severity] = by_sev.get(severity, 0) + 1
             count += 1
 
-        ctx.log.success(f"[nuclei] {count} findings")
-        return {"findings": count}
+        summary = ", ".join(f"{k}:{v}" for k, v in sorted(by_sev.items())) or "none"
+        ctx.log.success(f"[nuclei] {count} findings ({summary})")
+        return {"findings": count, "by_severity": by_sev}

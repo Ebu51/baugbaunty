@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "baugbaunty": {
+      "command": "python",
+      "args": ["-m", "baugbaunty", "mcp"],
+      "env": {}
+    }
+  }
+}

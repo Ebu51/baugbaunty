@@ -66,46 +66,71 @@ class ContentModule(Module):
             return [s for s in self.services if ctx.scope.is_allowed(s)]
         return [s["url"] for s in ctx.store.services() if ctx.scope.is_allowed(s["url"])]
 
+    def _expand(self, ctx: Context, words: list[str]) -> list[str]:
+        """Apply extension permutations to each word."""
+
+        exts = ctx.config.get("modules.content.permute_ext", []) or []
+        if not exts:
+            return words
+        out: list[str] = []
+        for w in words:
+            out.append(w)
+            # Don't double-append extensions to words that already have a dot path.
+            if "." in w.split("/")[-1]:
+                continue
+            for ext in exts:
+                out.append(w + ext)
+        # De-dup while preserving order.
+        return list(dict.fromkeys(out))
+
     def run(self, ctx: Context) -> dict:
         bases = self._base_urls(ctx)
         if not bases:
             ctx.log.warn("[content] no in-scope services; run probe first")
             return {"checked": 0, "found": 0}
 
-        words = self._load_wordlist(ctx)
+        words = self._expand(ctx, self._load_wordlist(ctx))
         allow = set(ctx.config.get("modules.content.status_allow", [200, 301, 302, 401, 403]))
+        recurse = bool(ctx.config.get("modules.content.recurse", False))
+        max_depth = int(ctx.config.get("modules.content.max_depth", 1))
         total_found = 0
 
         for base in bases:
             base = base.rstrip("/")
-            soft404 = self._calibrate(ctx, base)
-            found = self._scan_base(ctx, base, words, allow, soft404)
+            found = self._scan_recursive(
+                ctx, base, "", words, allow, recurse, max_depth, depth=0, seen=set()
+            )
             total_found += found
             ctx.log.success(f"[content] {base}: {found} interesting paths")
 
         return {"checked": len(bases), "found": total_found}
 
-    def _calibrate(self, ctx: Context, base: str) -> int | None:
+    def _calibrate(self, ctx: Context, base: str, prefix: str) -> int | None:
         """Request a random path to learn the server's 'not found' status."""
 
         rand = "".join(random.choices(string.ascii_lowercase, k=16))
-        resp = ctx.http.get(f"{base}/{rand}")
+        root = f"{base}/{prefix}".rstrip("/")
+        resp = ctx.http.get(f"{root}/{rand}", follow_redirects=False)
         return resp.status if resp.ok else None
 
-    def _scan_base(
-        self, ctx: Context, base: str, words: list[str], allow: set, soft404: int | None
+    def _scan_recursive(
+        self, ctx: Context, base: str, prefix: str, words: list[str], allow: set,
+        recurse: bool, max_depth: int, depth: int, seen: set,
     ) -> int:
+        root = f"{base}/{prefix}".rstrip("/")
+        soft404 = self._calibrate(ctx, base, prefix)
         found = 0
+        recurse_into: list[str] = []
         workers = int(ctx.config.get("limits.concurrency", 20))
 
         def check(path: str) -> tuple[str, int] | None:
-            url = f"{base}/{path.lstrip('/')}"
+            url = f"{root}/{path.lstrip('/')}"
             if not ctx.scope.is_allowed(url):
                 return None
-            resp = ctx.http.get(url)
+            # Don't follow redirects: a 301/302 is itself a discovery signal.
+            resp = ctx.http.get(url, follow_redirects=False)
             if not resp.ok or resp.status == 0:
                 return None
-            # Skip soft-404s (server returns the same status for bogus paths).
             if soft404 is not None and resp.status == soft404 and resp.status not in (401, 403):
                 return None
             if resp.status in allow:
@@ -119,15 +144,33 @@ class ContentModule(Module):
                 if not res:
                     continue
                 path, status = res
-                url = f"{base}/{path.lstrip('/')}"
+                rel = f"{prefix}/{path.lstrip('/')}".lstrip("/")
+                url = f"{base}/{rel}"
+                if url in seen:
+                    continue
+                seen.add(url)
                 found += 1
                 severity = "info"
-                name = f"Discovered path: /{path.lstrip('/')} ({status})"
+                name = f"Discovered path: /{rel} ({status})"
                 if path in _SENSITIVE and status in (200, 301, 302):
                     severity = "medium"
-                    name = f"Sensitive path exposed: /{path.lstrip('/')} ({status})"
+                    name = f"Sensitive path exposed: /{rel} ({status})"
                 ctx.store.add_finding(
                     target=url, module="content", name=name,
                     severity=severity, evidence=f"HTTP {status} at {url}",
                 )
+                # Directory-like hits are recursion candidates.
+                if recurse and depth < max_depth and self._dir_like(path, status):
+                    recurse_into.append(rel.rstrip("/"))
+
+        for sub in recurse_into:
+            found += self._scan_recursive(
+                ctx, base, sub, words, allow, recurse, max_depth, depth + 1, seen
+            )
         return found
+
+    @staticmethod
+    def _dir_like(path: str, status: int) -> bool:
+        last = path.rstrip("/").split("/")[-1]
+        # No file extension and a redirect/success -> likely a directory.
+        return "." not in last and status in (200, 301, 302, 403)

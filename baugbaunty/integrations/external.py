@@ -117,16 +117,35 @@ def naabu(hosts: Iterable[str], top_ports: int = 100, timeout: float = 300) -> l
     return list(stream_jsonl(argv, stdin=data, timeout=timeout))
 
 
+def nuclei_update_templates(timeout: float = 300) -> ToolResult:
+    """Run ``nuclei -update-templates`` to refresh the template corpus."""
+
+    return run(["nuclei", "-update-templates", "-silent"], timeout=timeout)
+
+
 def nuclei(
     targets: Iterable[str],
     severities: Iterable[str],
     rate_limit: int = 150,
     timeout: float = 1800,
+    templates: str = "",
+    tags: Iterable[str] | None = None,
+    exclude_severities: Iterable[str] | None = None,
+    extra_args: Iterable[str] | None = None,
 ) -> list[dict]:
     argv = [
         "nuclei", "-silent", "-jsonl", "-no-color",
         "-rate-limit", str(rate_limit),
-        "-severity", ",".join(severities),
     ]
+    if severities:
+        argv += ["-severity", ",".join(severities)]
+    if exclude_severities:
+        argv += ["-exclude-severity", ",".join(exclude_severities)]
+    if templates:
+        argv += ["-templates", templates]
+    if tags:
+        argv += ["-tags", ",".join(tags)]
+    if extra_args:
+        argv += list(extra_args)
     data = "\n".join(targets)
     return list(stream_jsonl(argv, stdin=data, timeout=timeout))
