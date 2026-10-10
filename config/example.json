@@ -38,7 +38,11 @@
       "sources": ["crtsh", "hackertarget", "rapiddns", "anubis", "otx"],
       "use_external": true
     },
-    "crawl": { "max_pages": 200, "max_depth": 3 },
+    "dnsbrute": { "wordlist": "", "max_candidates": 5000, "permutations": true },
+    "asn": { "org_keywords": [], "max_prefixes": 200 },
+    "secheaders": {},
+    "cluster": {},
+    "crawl": { "max_pages": 200, "max_depth": 3, "headless": false },
     "urltriage": {},
     "dns": {
       "use_external": true,
@@ -59,7 +63,7 @@
     },
     "cvecheck": { "extra": "", "online": false },
     "githubdork": { "token": "", "terms": [], "max_results": 20 },
-    "ratecal": { "max_requests": 15, "concurrency": 10 },
+    "ratecal": { "max_requests": 15, "concurrency": 10, "auto_tune": false },
     "openapi": {},
     "buckets": { "keywords": [], "providers": ["s3", "gcs", "azure"], "max_candidates": 200 },
     "screenshot": {},

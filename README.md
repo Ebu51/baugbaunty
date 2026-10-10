@@ -97,15 +97,18 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | Phase        | Traffic to target? | What it does | Powered by |
 |--------------|:---:|--------------|------------|
 | `subdomains` | ❌ passive | Certificate-transparency (crt.sh) + passive-DNS sources (HackerTarget, RapidDNS, Anubis, OTX) + `subfinder` | built-in / `subfinder` |
+| `asn`        | ❌ passive | Org name → ASNs → announced IPv4 CIDRs (via BGPView); reports ranges to add to scope manually | built-in |
 | `wayback`    | ❌ passive | Historical URL mining from Wayback Machine + AlienVault OTX; flags interesting archived URLs | built-in |
 | `githubdork` | ❌ passive | Searches GitHub code for leaked references to the target (repo+path leads, no secret values) | built-in (token) |
 | `buckets`    | ❌ passive | Enumerates S3/GCS/Azure buckets from program keywords; flags publicly listable ones | built-in |
+| `dnsbrute`   | ❌ passive¹ | Active DNS brute-force + permutation of known subdomains, with wildcard filtering | built-in |
 | `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
 | `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (40+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
 | `waf`        | ✅ active | Fingerprints the WAF in front of each service (Cloudflare, Akamai, Imperva, AWS, F5, ModSecurity…) | built-in |
-| `ratecal`    | ✅ active | Calibrates the target's rate limit (429/503 + Retry-After) so later phases stay polite | built-in |
+| `ratecal`    | ✅ active | Calibrates the target's rate limit (429/503 + Retry-After); can auto-tune the limiter | built-in |
 | `seeds`      | ✅ active | Seeds paths from robots.txt & sitemap.xml; captures favicon hashes (mmh3/md5) | built-in |
+| `secheaders` | ✅ active | Deep CSP weakness + cookie-flag (HttpOnly/Secure/SameSite) analysis | built-in |
 | `vhost`      | ✅ active | Virtual-host discovery — finds sites served on an in-scope IP via the Host header | built-in |
 | `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
 | `graphql`    | ✅ active | Finds GraphQL endpoints and flags when **introspection** is enabled (schema disclosure) | built-in |
@@ -113,6 +116,7 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | `crawl`      | ✅ active | In-scope spider: follows links, harvests URLs, parameters, forms and new subdomains | built-in |
 | `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration, **recursion** and **extension permutation**; flags sensitive paths | built-in |
 | `urltriage`  | ❌ passive² | gf-style: tags the URL corpus by likely vuln class (SSRF/XSS/SQLi/LFI/redirect/IDOR/SSTI/CMDi) | built-in |
+| `cluster`    | ❌ passive² | Groups near-identical live services by response signature to cut duplicate triage | built-in |
 | `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
 | `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection / **CRLF** / **host-header injection** / **SSRF canary** checks | built-in |
 | `cvecheck`   | ❌ passive² | Correlates disclosed versions with a curated known-CVE ruleset + optional **OSV** online enrichment | built-in |
@@ -123,8 +127,27 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 
 ¹ DNS resolution queries public/authoritative resolvers, not the target's web
 app, so it is treated as non-intrusive recon and doesn't require the auth gate.
-² `cvecheck` and `urltriage` only analyse data already collected; they send no
-new traffic. `githubdork` queries GitHub, not the target.
+² `cvecheck`, `urltriage` and `cluster` only analyse data already collected;
+they send no new traffic. `githubdork`/`asn` query third-party services, not the
+target.
+
+### Exporting for tool chaining
+
+Dump the results as plain lists to pipe into other tools:
+
+```bash
+baugbaunty export -c acme.json --what subdomains urls services
+# -> output/acme-subdomains.txt, acme-urls.txt, acme-services.txt
+```
+
+### Headless crawling & rate auto-tune
+
+```json
+"modules": {
+  "crawl":   { "headless": true },   // render SPA/JS pages via Playwright if installed
+  "ratecal": { "auto_tune": true }   // slow the pipeline under the measured limit
+}
+```
 
 ### Recursive discovery
 

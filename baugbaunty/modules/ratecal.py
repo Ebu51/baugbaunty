@@ -54,12 +54,19 @@ class RateCalModule(Module):
                 elapsed = max(time.monotonic() - start, 1e-6)
                 rate = sent / elapsed
                 retry_after = resp.header("retry-after")
+                tuned = ""
+                # Optionally slow the whole pipeline to stay under the observed limit.
+                if ctx.config.get("modules.ratecal.auto_tune", False):
+                    safe = max(rate * 0.5, 0.5)
+                    ctx.limiter.set_per_host_rate(safe)
+                    tuned = f"; auto-tuned per-host rate to {safe:.1f} req/s"
+                    ctx.log.info(f"[ratecal] auto-tuned per-host rate to {safe:.1f} req/s")
                 ctx.store.add_finding(
                     target=base, module="ratecal",
                     name=f"Rate limiting observed after {sent} requests", severity="info",
                     evidence=(
                         f"HTTP {resp.status} after {sent} requests (~{rate:.1f} req/s)"
-                        + (f"; Retry-After: {retry_after}" if retry_after else "")
+                        + (f"; Retry-After: {retry_after}" if retry_after else "") + tuned
                     ),
                     requests=sent, status=resp.status, retry_after=retry_after,
                 )
