@@ -15,13 +15,17 @@ from .core.scope import Scope
 from .core.store import Store
 from .integrations import external
 from .modules.base import Context
+from .integrations import programs
 from .modules.content import ContentModule
+from .modules.cvecheck import CveCheckModule
 from .modules.dns import DnsModule
+from .modules.githubdork import GithubDorkModule
 from .modules.jsintel import JsIntelModule
 from .modules.nuclei import NucleiModule
 from .modules.params import ParamsModule
 from .modules.ports import PortsModule
 from .modules.probe import ProbeModule
+from .modules.screenshot import ScreenshotModule
 from .modules.seeds import SeedsModule
 from .modules.subdomains import SubdomainModule
 from .modules.takeover import TakeoverModule
@@ -44,6 +48,7 @@ BANNER = r"""
 PHASES = [
     "subdomains",  # passive OSINT
     "wayback",     # passive archive mining
+    "githubdork",  # passive GitHub leak search
     "dns",         # resolution + wildcard filtering (non-intrusive)
     "takeover",    # subdomain takeover detection (active)
     "probe",       # live HTTP probing + fingerprint (active)
@@ -53,13 +58,31 @@ PHASES = [
     "content",     # content discovery (active)
     "params",      # hidden parameter discovery (active)
     "webchecks",   # CORS / open redirect / reflection (active)
+    "cvecheck",    # version -> known-CVE correlation (analysis, no traffic)
+    "screenshot",  # visual triage of live services (active)
     "ports",       # port scanning (active)
     "nuclei",      # template vuln scan (active)
 ]
 # Phases that send traffic to the target (require authorization).
 ACTIVE_PHASES = {
     "takeover", "probe", "seeds", "vhost", "jsintel",
-    "content", "params", "webchecks", "ports", "nuclei",
+    "content", "params", "webchecks", "screenshot", "ports", "nuclei",
+}
+
+# Preset scan profiles: politeness + which phases to run by default.
+PROFILES: dict[str, dict] = {
+    "quiet": {
+        "limits": {"global_rps": 3.0, "per_host_rps": 1.5, "concurrency": 8},
+        "phases": ["subdomains", "wayback", "dns", "probe", "seeds", "cvecheck"],
+    },
+    "normal": {
+        "limits": {"global_rps": 10.0, "per_host_rps": 5.0, "concurrency": 20},
+        "phases": PHASES,
+    },
+    "aggressive": {
+        "limits": {"global_rps": 25.0, "per_host_rps": 10.0, "concurrency": 40},
+        "phases": PHASES,
+    },
 }
 
 
@@ -147,6 +170,18 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(BANNER)
     cfg = Config.load(args.config)
 
+    # Apply a preset profile first, so explicit flags still override it.
+    profile_phases: list[str] | None = None
+    if getattr(args, "profile", None):
+        prof = PROFILES.get(args.profile)
+        if not prof:
+            log.error(f"Unknown profile '{args.profile}'. Valid: {', '.join(PROFILES)}")
+            return 1
+        for k, v in prof.get("limits", {}).items():
+            cfg.set(f"limits.{k}", v)
+        profile_phases = list(prof.get("phases", []))
+        log.info(f"Profile '{args.profile}' applied")
+
     # CLI overrides for scope and limits.
     if args.domain:
         inc = cfg.get("scope.include", []) or []
@@ -166,7 +201,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         log.error("No scope defined. Use --domain or set scope.include in config.")
         return 1
 
-    phases = args.phases or PHASES
+    phases = args.phases or profile_phases or PHASES
     bad = [p for p in phases if p not in PHASES]
     if bad:
         log.error(f"Unknown phase(s): {', '.join(bad)}. Valid: {', '.join(PHASES)}")
@@ -194,6 +229,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             "subdomains": lambda: SubdomainModule(domains).run(ctx),
             "wayback": lambda: WaybackModule(domains).run(ctx),
             "dns": lambda: DnsModule().run(ctx),
+            "githubdork": lambda: GithubDorkModule(domains).run(ctx),
             "takeover": lambda: TakeoverModule().run(ctx),
             "probe": lambda: ProbeModule().run(ctx),
             "seeds": lambda: SeedsModule().run(ctx),
@@ -202,6 +238,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             "content": lambda: ContentModule().run(ctx),
             "params": lambda: ParamsModule().run(ctx),
             "webchecks": lambda: WebChecksModule().run(ctx),
+            "cvecheck": lambda: CveCheckModule().run(ctx),
+            "screenshot": lambda: ScreenshotModule().run(ctx),
             "ports": lambda: PortsModule().run(ctx),
             "nuclei": lambda: NucleiModule().run(ctx),
         }
@@ -251,10 +289,37 @@ def _report_diff(diff: dict, log, first_run: bool) -> None:
                  f"({f.get('target')})")
 
 
+def cmd_import(args: argparse.Namespace) -> int:
+    import json as _json
+
+    log = configure(args.log_level)
+    text = Path(args.file).read_text(encoding="utf-8")
+    result = programs.import_scope(text, platform=args.platform)
+    if args.name:
+        result.name = args.name
+    if not result.include:
+        log.error("No in-scope web assets found. Check the file/platform.")
+        return 1
+    cfg = programs.to_config_dict(result, name=args.name)
+    out = Path(args.output)
+    if out.exists() and not args.force:
+        log.error(f"{out} exists (use --force)")
+        return 1
+    out.write_text(_json.dumps(cfg, indent=2), encoding="utf-8")
+    log.success(f"Imported {len(result.include)} in-scope, "
+                f"{len(result.exclude)} out-of-scope rule(s) -> {out}")
+    if result.skipped:
+        log.info(f"Skipped {len(result.skipped)} non-web asset(s): "
+                 f"{', '.join(result.skipped[:8])}" + (" ..." if len(result.skipped) > 8 else ""))
+    log.warn("Review the generated scope, then set program.authorized=true "
+             "before running active phases.")
+    return 0
+
+
 def cmd_monitor(args: argparse.Namespace) -> int:
     # Monitor is a thin wrapper over run: cheaper default phases for change
     # detection, and it leans on run's built-in diff + notifications.
-    if not args.phases:
+    if not args.phases and not getattr(args, "profile", None):
         args.phases = ["subdomains", "dns", "probe"]
     return cmd_run(args)
 
@@ -300,6 +365,15 @@ def build_parser() -> argparse.ArgumentParser:
     pt = sub.add_parser("tools", help="show which external tools are installed")
     pt.set_defaults(func=cmd_tools)
 
+    pimp = sub.add_parser("import", help="build a config from a HackerOne/Bugcrowd scope file")
+    pimp.add_argument("-f", "--file", required=True, help="scope file (JSON or plain list)")
+    pimp.add_argument("--platform", default="auto",
+                      choices=["auto", "hackerone", "bugcrowd", "list"])
+    pimp.add_argument("-o", "--output", default="config.json")
+    pimp.add_argument("-n", "--name", default="", help="program name")
+    pimp.add_argument("--force", action="store_true")
+    pimp.set_defaults(func=cmd_import)
+
     ps = sub.add_parser("scope", help="check assets against the config scope")
     ps.add_argument("-c", "--config", required=True)
     ps.add_argument("assets", nargs="+")
@@ -312,6 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--phases", nargs="+", metavar="PHASE",
                     help=f"subset of: {', '.join(PHASES)}")
     pr.add_argument("--rps", type=float, help="global requests/sec override")
+    pr.add_argument("--profile", choices=list(PROFILES), help="preset scan profile")
     pr.add_argument("--authorize", action="store_true",
                     help="confirm you are authorized to test this scope")
     pr.set_defaults(func=cmd_run)
@@ -328,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"subset of: {', '.join(PHASES)} "
                          "(default: subdomains dns probe for cheap change detection)")
     pm.add_argument("--rps", type=float, help="global requests/sec override")
+    pm.add_argument("--profile", choices=list(PROFILES), help="preset scan profile")
     pm.add_argument("--authorize", action="store_true",
                     help="confirm you are authorized to test this scope")
     pm.set_defaults(func=cmd_monitor)

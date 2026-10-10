@@ -43,6 +43,9 @@
     "vhost": { "wordlist": "", "max_hosts": 300 },
     "params": { "wordlist": "", "chunk_size": 25, "max_params": 500 },
     "webchecks": { "checks": ["cors", "openredirect", "reflection"], "max_targets": 300 },
+    "cvecheck": { "extra": "" },
+    "githubdork": { "token": "", "terms": [], "max_results": 20 },
+    "screenshot": {},
     "content": {
       "wordlist": "",
       "extensions": ["", "/"],

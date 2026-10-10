@@ -93,6 +93,7 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 |--------------|:---:|--------------|------------|
 | `subdomains` | ❌ passive | Certificate-transparency (crt.sh) + aggregated passive sources | built-in / `subfinder` |
 | `wayback`    | ❌ passive | Historical URL mining from Wayback Machine + AlienVault OTX; flags interesting archived URLs | built-in |
+| `githubdork` | ❌ passive | Searches GitHub code for leaked references to the target (repo+path leads, no secret values) | built-in (token) |
 | `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
 | `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (14+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
@@ -102,12 +103,43 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration; flags sensitive paths | built-in |
 | `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
 | `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection (XSS-candidate) checks | built-in |
+| `cvecheck`   | ❌ passive² | Correlates disclosed software versions with a curated known-CVE ruleset | built-in |
+| `screenshot` | ✅ active | Visual triage screenshots of live services | Playwright / `gowitness` |
 | `ports`      | ✅ active | Open-port discovery | built-in / `naabu` |
 | `nuclei`     | ✅ active | Template-based vulnerability checks | `nuclei` |
 | _report_     | — | JSON + Markdown + self-contained HTML | always runs |
 
 ¹ DNS resolution queries public/authoritative resolvers, not the target's web
 app, so it is treated as non-intrusive recon and doesn't require the auth gate.
+² `cvecheck` only analyses data already collected by `probe`; it sends no new
+traffic. `githubdork` queries GitHub, not the target.
+
+### Importing program scope
+
+Stop hand-copying scope. Point `import` at a HackerOne/Bugcrowd scope export (or
+a plain list) and it builds a config with include/exclude filled in and
+non-web assets dropped:
+
+```bash
+baugbaunty import -f hackerone-scope.json -n acme -o acme.json
+# plain list: one asset per line, a leading ! marks out-of-scope
+baugbaunty import -f scope.txt --platform list -o acme.json
+```
+
+### Scan profiles
+
+```bash
+baugbaunty run -c acme.json --authorize --profile quiet       # slow, passive-leaning
+baugbaunty run -c acme.json --authorize --profile aggressive  # fast, full pipeline
+```
+
+`quiet` (3 rps, discovery + cvecheck), `normal`, `aggressive` (25 rps, everything).
+Explicit `--phases` / `--rps` always override the profile.
+
+### GitHub dorking
+
+Set a token (`modules.githubdork.token` or the `GITHUB_TOKEN` env var) to enable
+leaked-reference search; without one the phase skips cleanly.
 
 ### Continuous monitoring (`monitor`)
 
@@ -155,7 +187,8 @@ baugbaunty/
 ├── modules/         # one file per pipeline phase
 │   ├── subdomains.py  wayback.py  dns.py  takeover.py
 │   ├── probe.py  seeds.py  vhost.py  jsintel.py  content.py
-│   ├── params.py  webchecks.py  ports.py  nuclei.py
+│   ├── params.py  webchecks.py  cvecheck.py  githubdork.py
+│   ├── screenshot.py  ports.py  nuclei.py
 │   └── fingerprint.py tech detection signatures
 ├── integrations/    # safe argv-only wrappers for external CLIs
 ├── report/          # JSON / Markdown / HTML renderers
@@ -212,8 +245,8 @@ Shipped (Tier 2): hidden-parameter discovery, safe CORS/open-redirect/
 reflection checks, virtual-host discovery, robots/sitemap seeding +
 favicon-hash correlation, and Burp/mitmproxy passthrough.
 
-Planned next (Tier 3): HackerOne/Bugcrowd scope import, screenshotting,
-GitHub dorking, CVE correlation, scan profiles.
+Shipped (Tier 3): HackerOne/Bugcrowd scope import, GitHub dorking, CVE
+correlation, screenshotting, and preset scan profiles.
 
 ---
 
