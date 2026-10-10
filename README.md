@@ -99,14 +99,17 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | `subdomains` | ❌ passive | Certificate-transparency (crt.sh) + aggregated passive sources | built-in / `subfinder` |
 | `wayback`    | ❌ passive | Historical URL mining from Wayback Machine + AlienVault OTX; flags interesting archived URLs | built-in |
 | `githubdork` | ❌ passive | Searches GitHub code for leaked references to the target (repo+path leads, no secret values) | built-in (token) |
+| `buckets`    | ❌ passive | Enumerates S3/GCS/Azure buckets from program keywords; flags publicly listable ones | built-in |
 | `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
 | `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (40+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
 | `waf`        | ✅ active | Fingerprints the WAF in front of each service (Cloudflare, Akamai, Imperva, AWS, F5, ModSecurity…) | built-in |
+| `ratecal`    | ✅ active | Calibrates the target's rate limit (429/503 + Retry-After) so later phases stay polite | built-in |
 | `seeds`      | ✅ active | Seeds paths from robots.txt & sitemap.xml; captures favicon hashes (mmh3/md5) | built-in |
 | `vhost`      | ✅ active | Virtual-host discovery — finds sites served on an in-scope IP via the Host header | built-in |
 | `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
 | `graphql`    | ✅ active | Finds GraphQL endpoints and flags when **introspection** is enabled (schema disclosure) | built-in |
+| `openapi`    | ✅ active | Finds OpenAPI/Swagger specs and seeds every documented operation & parameter | built-in |
 | `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration, **recursion** and **extension permutation**; flags sensitive paths | built-in |
 | `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
 | `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection / **CRLF** / **host-header injection** / **SSRF canary** checks | built-in |
@@ -215,9 +218,10 @@ baugbaunty/
 │   └── logging.py     tiny structured logger
 ├── modules/         # one file per pipeline phase
 │   ├── subdomains.py  wayback.py  dns.py  takeover.py
-│   ├── probe.py  waf.py  seeds.py  vhost.py  jsintel.py
-│   ├── graphql.py  content.py  params.py  webchecks.py
-│   ├── cvecheck.py  githubdork.py  screenshot.py  ports.py  nuclei.py
+│   ├── probe.py  waf.py  ratecal.py  seeds.py  vhost.py  jsintel.py
+│   ├── graphql.py  openapi.py  buckets.py  content.py  params.py
+│   ├── webchecks.py  cvecheck.py  githubdork.py  screenshot.py
+│   ├── ports.py  nuclei.py
 │   └── fingerprint.py tech detection signatures
 ├── integrations/    # safe argv-only wrappers for external CLIs
 ├── report/          # JSON / Markdown / HTML renderers
@@ -294,12 +298,35 @@ asks:
 
 > "Draft HackerOne submissions for the high/critical findings so I can review."
 
+## Authenticated scanning
+
+Test as a logged-in user by supplying credentials that are attached to every
+request:
+
+```json
+"auth": {
+  "bearer": "eyJ...",            // -> Authorization: Bearer ...
+  "cookie": "session=abc; ...",  // -> Cookie: ...
+  "headers": { "X-Api-Key": "..." }
+}
+```
+
 ## Proxy / Burp passthrough
 
 Route every request through Burp or mitmproxy for manual inspection and replay:
 
 ```json
 "http": { "proxy": "http://127.0.0.1:8080", "verify_tls": false }
+```
+
+## Reports as PDF
+
+Any report or submission can be rendered to a self-contained PDF (pure-Python,
+no dependency):
+
+```bash
+python -m baugbaunty report -c acme.json --formats pdf html
+python -m baugbaunty submission -c acme.json --platform hackerone --format pdf
 ```
 
 ## Roadmap
@@ -314,6 +341,10 @@ favicon-hash correlation, and Burp/mitmproxy passthrough.
 
 Shipped (Tier 3): HackerOne/Bugcrowd scope import, GitHub dorking, CVE
 correlation, screenshotting, and preset scan profiles.
+
+Shipped (Tier 4): GraphQL introspection, WAF detection, OpenAPI/Swagger
+parsing, cloud bucket enumeration, rate-limit calibration, authenticated
+scanning, PDF reports, an MCP server for Claude, and CI with integration tests.
 
 ---
 

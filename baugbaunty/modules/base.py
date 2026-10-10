@@ -35,6 +35,16 @@ class Context:
             global_rps=float(config.get("limits.global_rps", 10)),
             per_host_rps=float(config.get("limits.per_host_rps", 5)),
         )
+        # Assemble request headers: base extras + authenticated-scanning creds.
+        headers = dict(config.get("http.extra_headers", {}) or {})
+        bearer = config.get("auth.bearer", "")
+        cookie = config.get("auth.cookie", "")
+        if bearer:
+            headers.setdefault("Authorization", f"Bearer {bearer}")
+        if cookie:
+            headers.setdefault("Cookie", cookie)
+        headers.update(config.get("auth.headers", {}) or {})
+
         http = HttpClient(
             scope=scope,
             limiter=limiter,
@@ -43,7 +53,7 @@ class Context:
             verify_tls=bool(config.get("http.verify_tls", True)),
             follow_redirects=bool(config.get("http.follow_redirects", True)),
             max_retries=int(config.get("limits.max_retries", 2)),
-            extra_headers=config.get("http.extra_headers", {}) or {},
+            extra_headers=headers,
             proxy=config.get("http.proxy", "") or "",
         )
         return cls(

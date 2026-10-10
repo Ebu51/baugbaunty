@@ -16,6 +16,7 @@ from .core.store import Store
 from .integrations import external
 from .modules.base import Context
 from .integrations import programs
+from .modules.buckets import BucketsModule
 from .modules.content import ContentModule
 from .modules.cvecheck import CveCheckModule
 from .modules.dns import DnsModule
@@ -23,9 +24,11 @@ from .modules.githubdork import GithubDorkModule
 from .modules.graphql import GraphqlModule
 from .modules.jsintel import JsIntelModule
 from .modules.nuclei import NucleiModule
+from .modules.openapi import OpenApiModule
 from .modules.params import ParamsModule
 from .modules.ports import PortsModule
 from .modules.probe import ProbeModule
+from .modules.ratecal import RateCalModule
 from .modules.screenshot import ScreenshotModule
 from .modules.seeds import SeedsModule
 from .modules.subdomains import SubdomainModule
@@ -51,14 +54,17 @@ PHASES = [
     "subdomains",  # passive OSINT
     "wayback",     # passive archive mining
     "githubdork",  # passive GitHub leak search
+    "buckets",     # cloud storage bucket enumeration (third-party, passive)
     "dns",         # resolution + wildcard filtering (non-intrusive)
     "takeover",    # subdomain takeover detection (active)
     "probe",       # live HTTP probing + fingerprint (active)
     "waf",         # WAF detection (active)
+    "ratecal",     # rate-limit calibration (active)
     "seeds",       # robots/sitemap/favicon seeding (active)
     "vhost",       # virtual-host discovery (active)
     "jsintel",     # JS endpoint + secret extraction (active)
     "graphql",     # GraphQL discovery + introspection (active)
+    "openapi",     # OpenAPI/Swagger spec discovery (active)
     "content",     # content discovery (active)
     "params",      # hidden parameter discovery (active)
     "webchecks",   # CORS / open redirect / reflection (active)
@@ -69,8 +75,8 @@ PHASES = [
 ]
 # Phases that send traffic to the target (require authorization).
 ACTIVE_PHASES = {
-    "takeover", "probe", "waf", "seeds", "vhost", "jsintel", "graphql",
-    "content", "params", "webchecks", "screenshot", "ports", "nuclei",
+    "takeover", "probe", "waf", "ratecal", "seeds", "vhost", "jsintel", "graphql",
+    "openapi", "content", "params", "webchecks", "screenshot", "ports", "nuclei",
 }
 
 # Preset scan profiles: politeness + which phases to run by default.
@@ -234,13 +240,16 @@ def cmd_run(args: argparse.Namespace) -> int:
             "wayback": lambda: WaybackModule(domains).run(ctx),
             "dns": lambda: DnsModule().run(ctx),
             "githubdork": lambda: GithubDorkModule(domains).run(ctx),
+            "buckets": lambda: BucketsModule().run(ctx),
             "takeover": lambda: TakeoverModule().run(ctx),
             "probe": lambda: ProbeModule().run(ctx),
             "waf": lambda: WafModule().run(ctx),
+            "ratecal": lambda: RateCalModule().run(ctx),
             "seeds": lambda: SeedsModule().run(ctx),
             "vhost": lambda: VhostModule().run(ctx),
             "jsintel": lambda: JsIntelModule().run(ctx),
             "graphql": lambda: GraphqlModule().run(ctx),
+            "openapi": lambda: OpenApiModule().run(ctx),
             "content": lambda: ContentModule().run(ctx),
             "params": lambda: ParamsModule().run(ctx),
             "webchecks": lambda: WebChecksModule().run(ctx),
@@ -480,13 +489,13 @@ def build_parser() -> argparse.ArgumentParser:
                       choices=["info", "low", "medium", "high", "critical"])
     psub.add_argument("--platform", default="generic",
                       choices=["generic", "hackerone", "bugcrowd"])
-    psub.add_argument("--format", default="markdown", choices=["markdown", "json"])
+    psub.add_argument("--format", default="markdown", choices=["markdown", "json", "pdf"])
     psub.set_defaults(func=cmd_submission)
 
     prep = sub.add_parser("report", help="regenerate reports from a results DB")
     prep.add_argument("-c", "--config", help="config file")
     prep.add_argument("--db", help="path to the sqlite results db")
-    prep.add_argument("--formats", nargs="+", choices=["json", "markdown", "html"])
+    prep.add_argument("--formats", nargs="+", choices=["json", "markdown", "html", "pdf"])
     prep.set_defaults(func=cmd_report)
 
     return p

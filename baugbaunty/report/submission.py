@@ -322,6 +322,15 @@ def generate_submissions(
         "",
     ]
     body = [build_submission(f, platform) for f in findings] or ["_No findings at or above the threshold._\n"]
+    full = "\n".join(header) + "\n".join(body)
+
+    if fmt == "pdf":
+        from .pdf import render_pdf
+
+        path = out / f"{program}-submissions.pdf"
+        render_pdf(f"{program} submissions", full.splitlines(), path)
+        return path
+
     path = out / f"{program}-submissions.md"
-    path.write_text("\n".join(header) + "\n".join(body), encoding="utf-8")
+    path.write_text(full, encoding="utf-8")
     return path

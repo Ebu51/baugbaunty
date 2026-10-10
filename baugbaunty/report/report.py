@@ -60,6 +60,13 @@ def generate_reports(store: Store, config: Config, out_dir: str | Path) -> list[
         p.write_text(_render_html(data), encoding="utf-8")
         written.append(p)
 
+    if "pdf" in formats:
+        from .pdf import render_pdf
+
+        p = out / f"{program}-report.pdf"
+        render_pdf(f"{program} report", _render_markdown(data).splitlines(), p)
+        written.append(p)
+
     return written
 
 
