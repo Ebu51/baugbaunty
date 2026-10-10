@@ -39,7 +39,8 @@ def test_tool_tools_status():
 
 def test_tools_registry_complete():
     for name in ("scope_check", "import_scope", "tools_status", "summary",
-                 "list_findings", "list_assets", "run"):
+                 "list_findings", "list_assets", "generate_report", "read_report",
+                 "generate_submission", "run"):
         assert name in mcp.TOOLS
         assert "handler" in mcp.TOOLS[name]
         assert mcp.TOOLS[name]["schema"]["type"] == "object"

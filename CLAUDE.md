@@ -41,8 +41,14 @@ can drive the toolkit as tools. This file tells Claude how to use it **safely**.
 ## MCP tools available
 
 - `scope_check`, `import_scope`, `tools_status` — safe, read-only / planning.
-- `summary`, `list_findings`, `list_assets` — read an existing results DB.
+- `summary`, `list_findings`, `list_assets`, `read_report` — read a results DB.
+- `generate_report`, `generate_submission` — produce reports and platform-ready
+  submission drafts (HackerOne/Bugcrowd/generic).
 - `run` — execute phases (active phases gated by authorization).
+
+When drafting submissions: these are automated DRAFTS. Present them to the user
+for review, make clear which findings are unverified leads, and never submit on
+the user's behalf.
 
 Results are stored in `output/<program>.sqlite`; reports are written to
 `output/` as JSON, Markdown and HTML.

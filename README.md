@@ -77,6 +77,9 @@ python -m baugbaunty run -c acme.json --authorize
 
 # 6. Regenerate reports in another format anytime
 python -m baugbaunty report -c acme.json --formats html markdown
+
+# 7. Draft platform-ready submissions for the serious findings
+python -m baugbaunty submission -c acme.json --platform hackerone --min-severity high
 ```
 
 You can also skip the config file for a quick pass:
@@ -276,12 +279,16 @@ speaks MCP over stdio.
 ```
 
 Tools exposed: `scope_check`, `import_scope`, `tools_status` (safe/planning);
-`summary`, `list_findings`, `list_assets` (read an existing results DB); and
-`run` (executes phases — active phases are refused unless the config is
-`authorized`, exactly as on the CLI). Example asks:
+`summary`, `list_findings`, `list_assets`, `read_report` (read an existing
+results DB); `generate_report`, `generate_submission` (produce reports and
+platform-ready submission drafts); and `run` (executes phases — active phases
+are refused unless the config is `authorized`, exactly as on the CLI). Example
+asks:
 
 > "Import this HackerOne scope, check example.com is in scope, then run the
 > passive phases and show me the findings by severity."
+
+> "Draft HackerOne submissions for the high/critical findings so I can review."
 
 ## Proxy / Burp passthrough
 

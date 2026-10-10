@@ -32,7 +32,7 @@ from .modules.takeover import TakeoverModule
 from .modules.vhost import VhostModule
 from .modules.wayback import WaybackModule
 from .modules.webchecks import WebChecksModule
-from .report import generate_reports
+from .report import generate_reports, generate_submissions
 
 BANNER = r"""
   _                      _                     _
@@ -358,6 +358,27 @@ def cmd_monitor(args: argparse.Namespace) -> int:
     return cmd_run(args)
 
 
+def cmd_submission(args: argparse.Namespace) -> int:
+    log = configure(args.log_level)
+    cfg = Config.load(args.config)
+    out_dir = Path(cfg.get("output.dir", "output"))
+    program = cfg.get("program.name", "engagement")
+    db_path = Path(args.db) if args.db else out_dir / f"{program}.sqlite"
+    if not db_path.exists():
+        log.error(f"No database at {db_path}. Run a scan first.")
+        return 1
+    store = Store.open(db_path)
+    try:
+        path = generate_submissions(
+            store, cfg, out_dir,
+            min_severity=args.min_severity, platform=args.platform, fmt=args.format,
+        )
+        log.success(f"Submissions written: {path}")
+    finally:
+        store.close()
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     log = configure(args.log_level)
     cfg = Config.load(args.config)
@@ -444,6 +465,17 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument("--authorize", action="store_true",
                     help="confirm you are authorized to test this scope")
     pm.set_defaults(func=cmd_monitor)
+
+    psub = sub.add_parser("submission",
+                          help="draft platform-ready vulnerability submissions from findings")
+    psub.add_argument("-c", "--config", required=True)
+    psub.add_argument("--db", help="path to the sqlite results db")
+    psub.add_argument("--min-severity", default="medium",
+                      choices=["info", "low", "medium", "high", "critical"])
+    psub.add_argument("--platform", default="generic",
+                      choices=["generic", "hackerone", "bugcrowd"])
+    psub.add_argument("--format", default="markdown", choices=["markdown", "json"])
+    psub.set_defaults(func=cmd_submission)
 
     prep = sub.add_parser("report", help="regenerate reports from a results DB")
     prep.add_argument("-c", "--config", help="config file")

@@ -37,6 +37,7 @@ from .core.config import Config
 from .core.scope import Scope
 from .core.store import Store
 from .integrations import external, programs
+from .report import generate_reports, generate_submissions
 
 PROTOCOL_VERSION = "2024-11-05"
 
@@ -156,6 +157,57 @@ def tool_list_assets(args: dict) -> str:
         store.close()
 
 
+def _config_for(args: dict) -> Config:
+    if args.get("config"):
+        return Config.load(args["config"])
+    cfg = Config()
+    if args.get("db"):
+        p = Path(args["db"])
+        cfg.set("output.dir", str(p.parent))
+        cfg.set("program.name", p.stem)
+    return cfg
+
+
+def tool_generate_report(args: dict) -> str:
+    store = _open_store(args)
+    try:
+        cfg = _config_for(args)
+        if args.get("formats"):
+            cfg.set("output.formats", args["formats"])
+        paths = generate_reports(store, cfg, cfg.get("output.dir", "output"))
+        return json.dumps({"reports": [str(p) for p in paths]}, indent=2)
+    finally:
+        store.close()
+
+
+def tool_read_report(args: dict) -> str:
+    cfg = _config_for(args)
+    fmt = args.get("format", "markdown")
+    ext = {"markdown": "md", "json": "json", "html": "html"}.get(fmt, "md")
+    program = cfg.get("program.name", "engagement")
+    path = Path(cfg.get("output.dir", "output")) / f"{program}-report.{ext}"
+    if not path.exists():
+        raise FileNotFoundError(f"No {fmt} report at {path}. Generate it first.")
+    text = path.read_text(encoding="utf-8")
+    return text[:200_000]
+
+
+def tool_generate_submission(args: dict) -> str:
+    store = _open_store(args)
+    try:
+        cfg = _config_for(args)
+        path = generate_submissions(
+            store, cfg, cfg.get("output.dir", "output"),
+            min_severity=args.get("min_severity", "medium"),
+            platform=args.get("platform", "generic"),
+            fmt=args.get("format", "markdown"),
+        )
+        content = path.read_text(encoding="utf-8")[:200_000]
+        return json.dumps({"path": str(path), "content": content}, indent=2)
+    finally:
+        store.close()
+
+
 def tool_run(args: dict) -> str:
     config = args.get("config")
     if not config:
@@ -252,6 +304,46 @@ TOOLS: dict[str, dict[str, Any]] = {
                 "db": {"type": "string"}, "config": {"type": "string"},
                 "kind": {"type": "string"}, "in_scope_only": {"type": "boolean"},
                 "limit": {"type": "integer"},
+            },
+        },
+    },
+    "generate_report": {
+        "handler": tool_generate_report,
+        "description": "Generate JSON/Markdown/HTML reports from a results DB.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "db": {"type": "string"}, "config": {"type": "string"},
+                "formats": {"type": "array", "items": {"type": "string",
+                            "enum": ["json", "markdown", "html"]}},
+            },
+        },
+    },
+    "read_report": {
+        "handler": tool_read_report,
+        "description": "Return the text of a previously generated report (markdown by default).",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "db": {"type": "string"}, "config": {"type": "string"},
+                "format": {"type": "string", "enum": ["markdown", "json", "html"]},
+            },
+        },
+    },
+    "generate_submission": {
+        "handler": tool_generate_submission,
+        "description": "Draft platform-ready vulnerability submissions (HackerOne/"
+                       "Bugcrowd/generic) from findings at or above min_severity, and "
+                       "return the document text. Drafts are automated leads — verify "
+                       "before submitting.",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "db": {"type": "string"}, "config": {"type": "string"},
+                "min_severity": {"type": "string",
+                                 "enum": ["info", "low", "medium", "high", "critical"]},
+                "platform": {"type": "string", "enum": ["generic", "hackerone", "bugcrowd"]},
+                "format": {"type": "string", "enum": ["markdown", "json"]},
             },
         },
     },
