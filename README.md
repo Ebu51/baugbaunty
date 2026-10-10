@@ -29,7 +29,9 @@ stay on:
    `--authorize`).
 
 Always read and follow each program's policy and respect `out-of-scope`,
-rate, and testing-window rules. Report responsibly.
+rate, and testing-window rules. Report responsibly. See
+[SECURITY.md](SECURITY.md) for the full responsible-use policy and how to
+report a vulnerability in the toolkit itself.
 
 ---
 
