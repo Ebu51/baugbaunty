@@ -95,19 +95,19 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | `wayback`    | ❌ passive | Historical URL mining from Wayback Machine + AlienVault OTX; flags interesting archived URLs | built-in |
 | `githubdork` | ❌ passive | Searches GitHub code for leaked references to the target (repo+path leads, no secret values) | built-in (token) |
 | `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
-| `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (14+ providers) | built-in |
+| `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (40+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
 | `seeds`      | ✅ active | Seeds paths from robots.txt & sitemap.xml; captures favicon hashes (mmh3/md5) | built-in |
 | `vhost`      | ✅ active | Virtual-host discovery — finds sites served on an in-scope IP via the Host header | built-in |
 | `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
-| `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration; flags sensitive paths | built-in |
+| `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration, **recursion** and **extension permutation**; flags sensitive paths | built-in |
 | `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
-| `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection (XSS-candidate) checks | built-in |
-| `cvecheck`   | ❌ passive² | Correlates disclosed software versions with a curated known-CVE ruleset | built-in |
+| `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection / **CRLF** / **host-header injection** / **SSRF canary** checks | built-in |
+| `cvecheck`   | ❌ passive² | Correlates disclosed versions with a curated known-CVE ruleset + optional **OSV** online enrichment | built-in |
 | `screenshot` | ✅ active | Visual triage screenshots of live services | Playwright / `gowitness` |
 | `ports`      | ✅ active | Open-port discovery | built-in / `naabu` |
-| `nuclei`     | ✅ active | Template-based vulnerability checks | `nuclei` |
-| _report_     | — | JSON + Markdown + self-contained HTML | always runs |
+| `nuclei`     | ✅ active | Template-based vuln checks with **custom templates**, **tag filters**, **auto-update** and enriched output (CVE/CWE/CVSS) | `nuclei` |
+| _report_     | — | JSON + Markdown + self-contained HTML, plus an end-of-run per-phase summary table | always runs |
 
 ¹ DNS resolution queries public/authoritative resolvers, not the target's web
 app, so it is treated as non-intrusive recon and doesn't require the auth gate.
@@ -140,6 +140,28 @@ Explicit `--phases` / `--rps` always override the profile.
 
 Set a token (`modules.githubdork.token` or the `GITHUB_TOKEN` env var) to enable
 leaked-reference search; without one the phase skips cleanly.
+
+### Advanced tuning
+
+```json
+"modules": {
+  "content":  { "recurse": true, "max_depth": 2,
+                "permute_ext": [".php", ".bak", ".json", ".old", ".zip"] },
+  "webchecks":{ "checks": ["cors","openredirect","reflection","crlf","hostheader","ssrf"],
+                "ssrf_canary": "YOUR-ID.oast.live" },
+  "cvecheck": { "online": true },
+  "nuclei":   { "templates": "/path/to/custom-templates", "tags": ["cve","exposure"],
+                "update": true }
+}
+```
+
+- **content**: `recurse` descends into discovered directories (bounded by
+  `max_depth`); `permute_ext` appends each extension to every word.
+- **webchecks SSRF**: set `ssrf_canary` to your out-of-band collaborator
+  (Interactsh/Burp Collaborator). Probes are sent with a unique subdomain per
+  parameter — a hit in your canary logs confirms SSRF. Blank disables it.
+- **cvecheck online**: enriches detected JS libraries against OSV.dev.
+- **nuclei**: point at custom templates, filter by tag, auto-update the corpus.
 
 ### Continuous monitoring (`monitor`)
 

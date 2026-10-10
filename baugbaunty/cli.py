@@ -244,17 +244,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             "nuclei": lambda: NucleiModule().run(ctx),
         }
         results: dict[str, dict] = {}
-        for phase in PHASES:  # run in canonical order regardless of arg order
-            if phase in phases:
-                results[phase] = dispatch[phase]()
+        durations: dict[str, float] = {}
+        ordered = [p for p in PHASES if p in phases]
+        for idx, phase in enumerate(ordered, 1):
+            log.info(f"[{idx}/{len(ordered)}] ▶ {phase}")
+            t0 = time.time()
+            results[phase] = dispatch[phase]()
+            durations[phase] = time.time() - t0
 
         # Always produce a report at the end of a run.
         reports = generate_reports(store, cfg, cfg.get("output.dir", "output"))
-        counts = store.counts()
-        log.success(
-            f"Done. {counts['assets']} assets, {counts['services']} services, "
-            f"{counts['findings']} findings."
-        )
+        _print_summary(log, results, durations, store)
         for r in reports:
             log.success(f"Report: {r}")
 
@@ -269,6 +269,34 @@ def cmd_run(args: argparse.Namespace) -> int:
     finally:
         store.close()
     return 0
+
+
+def _print_summary(log, results: dict, durations: dict, store) -> None:
+    """Print a per-phase table and a findings-by-severity breakdown."""
+
+    print("\n  Phase        Result                                   Time", file=sys.stderr)
+    print("  " + "-" * 64, file=sys.stderr)
+    for phase, res in results.items():
+        metrics = ", ".join(
+            f"{k}={v}" for k, v in res.items()
+            if isinstance(v, (int, float, bool, str)) and k != "by_severity"
+        )
+        dur = durations.get(phase, 0.0)
+        print(f"  {phase:<12} {metrics[:40]:<40} {dur:6.1f}s", file=sys.stderr)
+    print("  " + "-" * 64, file=sys.stderr)
+
+    # Findings by severity.
+    sev_counts: dict[str, int] = {}
+    for f in store.findings():
+        s = f.get("severity", "info")
+        sev_counts[s] = sev_counts.get(s, 0) + 1
+    order = ["critical", "high", "medium", "low", "info"]
+    sev_line = "  ".join(f"{s}:{sev_counts.get(s, 0)}" for s in order)
+    counts = store.counts()
+    log.success(
+        f"Done. {counts['assets']} assets, {counts['services']} services, "
+        f"{counts['findings']} findings  [{sev_line}]"
+    )
 
 
 def _report_diff(diff: dict, log, first_run: bool) -> None:

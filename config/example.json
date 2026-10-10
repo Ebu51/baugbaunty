@@ -42,17 +42,32 @@
     "seeds": { "favicon": true },
     "vhost": { "wordlist": "", "max_hosts": 300 },
     "params": { "wordlist": "", "chunk_size": 25, "max_params": 500 },
-    "webchecks": { "checks": ["cors", "openredirect", "reflection"], "max_targets": 300 },
-    "cvecheck": { "extra": "" },
+    "webchecks": {
+      "checks": ["cors", "openredirect", "reflection", "crlf", "hostheader", "ssrf"],
+      "max_targets": 300,
+      "ssrf_canary": ""
+    },
+    "cvecheck": { "extra": "", "online": false },
     "githubdork": { "token": "", "terms": [], "max_results": 20 },
     "screenshot": {},
     "content": {
       "wordlist": "",
       "extensions": ["", "/"],
+      "permute_ext": [],
+      "recurse": false,
+      "max_depth": 1,
       "status_allow": [200, 204, 301, 302, 307, 401, 403, 405]
     },
     "ports": { "top_ports": 100, "use_external": true },
-    "nuclei": { "severity": ["low", "medium", "high", "critical"], "rate_limit": 150 }
+    "nuclei": {
+      "severity": ["low", "medium", "high", "critical"],
+      "rate_limit": 150,
+      "templates": "",
+      "tags": [],
+      "exclude_severity": [],
+      "update": false,
+      "extra_args": []
+    }
   },
   "notifications": {
     "enabled": false,

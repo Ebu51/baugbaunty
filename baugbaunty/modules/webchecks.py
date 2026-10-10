@@ -27,6 +27,13 @@ _REDIRECT_PARAMS = {
     "next", "url", "dest", "destination", "continue", "goto", "out", "target",
     "rurl", "u", "link", "forward", "callback",
 }
+# Parameters commonly backed by a server-side fetch (SSRF-prone).
+_SSRF_PARAMS = {
+    "url", "uri", "u", "link", "src", "source", "dest", "destination", "redirect",
+    "redirect_uri", "callback", "webhook", "feed", "host", "port", "to", "out",
+    "image", "imageurl", "img", "proxy", "path", "load", "fetch", "data", "resource",
+    "domain", "site", "page", "continue", "open", "view", "window", "api", "endpoint",
+}
 
 
 def _marker() -> str:
@@ -47,12 +54,22 @@ class WebChecksModule(Module):
 
         if "cors" in checks:
             findings += self._cors(ctx, self._service_urls(ctx)[:maxn])
-        if {"openredirect", "reflection"} & checks:
+        if "hostheader" in checks:
+            findings += self._host_header(ctx, self._service_urls(ctx)[:maxn])
+        if {"openredirect", "reflection", "crlf", "ssrf"} & checks:
             pairs = self._param_targets(ctx)[:maxn]
             if "openredirect" in checks:
                 findings += self._open_redirect(ctx, pairs)
             if "reflection" in checks:
                 findings += self._reflection(ctx, pairs)
+            if "crlf" in checks:
+                findings += self._crlf(ctx, pairs)
+            if "ssrf" in checks:
+                canary = ctx.config.get("modules.webchecks.ssrf_canary", "")
+                if canary:
+                    findings += self._ssrf(ctx, pairs, canary)
+                else:
+                    ctx.log.info("[webchecks] ssrf check skipped (no ssrf_canary configured)")
 
         ctx.log.success(f"[webchecks] {findings} lead(s) flagged")
         return {"findings": findings}
@@ -182,6 +199,81 @@ class WebChecksModule(Module):
                     evidence=f"Value reflected (metacharacters appear encoded) in {test}",
                     param=param,
                 )
+        return n
+
+
+    # --- host header injection -------------------------------------------
+    def _host_header(self, ctx: Context, urls: list[str]) -> int:
+        n = 0
+        evil = f"{_marker()}.evil.example"
+        for url in urls:
+            resp = ctx.http.get(
+                url,
+                headers={"Host": evil, "X-Forwarded-Host": evil},
+                follow_redirects=False,
+            )
+            if not resp.ok:
+                continue
+            loc = resp.header("location")
+            body = resp.text(limit=100_000)
+            if (loc and evil in loc) or (evil in body):
+                where = "Location header" if (loc and evil in loc) else "response body"
+                n += 1
+                ctx.store.add_finding(
+                    target=url, module="webchecks",
+                    name="Host header injection (reflected)", severity="medium",
+                    evidence=f"Injected Host/X-Forwarded-Host '{evil}' reflected in {where}",
+                )
+                ctx.log.warn(f"[webchecks] host-header injection: {url}")
+        return n
+
+    # --- CRLF / response splitting ---------------------------------------
+    def _crlf(self, ctx: Context, pairs: list[tuple[str, str]]) -> int:
+        n = 0
+        for url, param in pairs:
+            marker = _marker()
+            # The CR/LF are URL-encoded on the wire; a vulnerable server decodes
+            # them and emits our header.
+            payload = f"x\r\n{marker}: bbxcrlf"
+            test = _set_param(url, param, payload)
+            resp = ctx.http.get(test, follow_redirects=False)
+            if resp.ok and resp.header(marker) == "bbxcrlf":
+                n += 1
+                ctx.store.add_finding(
+                    target=test, module="webchecks",
+                    name=f"CRLF / header injection via '{param}'", severity="medium",
+                    evidence=f"Injected header '{marker}' appeared in the response of {test}",
+                    param=param,
+                )
+                ctx.log.warn(f"[webchecks] CRLF injection: {test}")
+        return n
+
+    # --- SSRF (out-of-band canary) ---------------------------------------
+    def _ssrf(self, ctx: Context, pairs: list[tuple[str, str]], canary: str) -> int:
+        n = 0
+        for url, param in pairs:
+            if param.lower() not in _SSRF_PARAMS:
+                continue
+            marker = _marker()
+            # Unique subdomain per probe so canary logs identify the exact param.
+            probe = f"http://{marker}.{canary}/"
+            test = _set_param(url, param, probe)
+            resp = ctx.http.get(test)
+            reflected = resp.ok and (marker in resp.text(limit=50_000) or canary in resp.text(limit=50_000))
+            n += 1
+            ctx.store.add_finding(
+                target=test, module="webchecks",
+                name=f"SSRF probe sent via '{param}'",
+                severity="info",
+                evidence=(
+                    f"Sent {param}={probe}. Check your canary ({canary}) logs for "
+                    f"'{marker}' — a hit confirms server-side request forgery."
+                    + (" Canary value was also reflected in the response." if reflected else "")
+                ),
+                param=param, canary_marker=marker,
+            )
+        if n:
+            ctx.log.info(f"[webchecks] sent {n} SSRF canary probe(s) -> check {canary} logs")
         return n
 
 

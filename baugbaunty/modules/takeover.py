@@ -99,6 +99,167 @@ _FINGERPRINTS: dict[str, dict] = {
         "fingerprint": ["unknown to Read the Docs"],
         "vulnerable": True,
     },
+    "Acquia": {
+        "cname": ["acquia-sites.com", "acquia.com"],
+        "fingerprint": ["The site you are looking for could not be found",
+                        "If you are an Acquia Cloud customer"],
+        "vulnerable": True,
+    },
+    "Agile CRM": {
+        "cname": ["agilecrm.com"],
+        "fingerprint": ["Sorry, this page is no longer available"],
+        "vulnerable": True,
+    },
+    "Aha": {
+        "cname": ["ideas.aha.io"],
+        "fingerprint": ["There is no portal here ... sending you back to Aha!"],
+        "vulnerable": True,
+    },
+    "Anima": {
+        "cname": ["animaapp.io"],
+        "fingerprint": ["If this is your website and you've just created it"],
+        "vulnerable": True,
+    },
+    "Big Cartel": {
+        "cname": ["bigcartel.com"],
+        "fingerprint": ["<h1>Oops! We couldn&#8217;t find that page.</h1>"],
+        "vulnerable": True,
+    },
+    "Campaign Monitor": {
+        "cname": ["createsend.com"],
+        "fingerprint": ["Trying to access your account?", "Double check the URL"],
+        "vulnerable": True,
+    },
+    "Cargo Collective": {
+        "cname": ["cargocollective.com"],
+        "fingerprint": ["404 &mdash; File not found"],
+        "vulnerable": True,
+    },
+    "Desk": {
+        "cname": ["desk.com"],
+        "fingerprint": ["Please try again or try Desk.com free for 14 days"],
+        "vulnerable": True,
+    },
+    "Gemfury": {
+        "cname": ["furyns.com"],
+        "fingerprint": ["404: This page could not be found"],
+        "vulnerable": True,
+    },
+    "GetResponse": {
+        "cname": ["gr8.com"],
+        "fingerprint": ["With GetResponse Landing Pages, lead generation has never been easier"],
+        "vulnerable": True,
+    },
+    "HatenaBlog": {
+        "cname": ["hatenablog.com"],
+        "fingerprint": ["404 Blog is not found"],
+        "vulnerable": True,
+    },
+    "Help Juice": {
+        "cname": ["helpjuice.com"],
+        "fingerprint": ["We could not find what you're looking for"],
+        "vulnerable": True,
+    },
+    "Help Scout": {
+        "cname": ["helpscoutdocs.com"],
+        "fingerprint": ["No settings were found for this company"],
+        "vulnerable": True,
+    },
+    "Intercom": {
+        "cname": ["custom.intercom.help"],
+        "fingerprint": ["Uh oh. That page doesn't exist", "This page is reserved for artistic dogs"],
+        "vulnerable": True,
+    },
+    "JetBrains": {
+        "cname": ["myjetbrains.com"],
+        "fingerprint": ["is not a registered InCloud YouTrack"],
+        "vulnerable": True,
+    },
+    "LaunchRock": {
+        "cname": ["launchrock.com"],
+        "fingerprint": ["It looks like you may have taken a wrong turn somewhere"],
+        "vulnerable": True,
+    },
+    "Mashery": {
+        "cname": ["mashery.com"],
+        "fingerprint": ["Unrecognized domain"],
+        "vulnerable": True,
+    },
+    "Netlify": {
+        "cname": ["netlify.app", "netlify.com"],
+        "fingerprint": ["Not Found - Request ID"],
+        "vulnerable": False,  # edge case; verify manually
+    },
+    "Ngrok": {
+        "cname": ["ngrok.io"],
+        "fingerprint": ["ngrok.io not found", "Tunnel *.ngrok.io not found"],
+        "vulnerable": True,
+    },
+    "Proposify": {
+        "cname": ["proposify.biz"],
+        "fingerprint": ["If you need immediate assistance, please contact"],
+        "vulnerable": True,
+    },
+    "Readme.io": {
+        "cname": ["readme.io"],
+        "fingerprint": ["Project doesnt exist... yet!"],
+        "vulnerable": True,
+    },
+    "Strikingly": {
+        "cname": ["s.strikinglydns.com", "strikingly.com"],
+        "fingerprint": ["But if you're looking to build your own website"],
+        "vulnerable": True,
+    },
+    "Teamwork": {
+        "cname": ["teamwork.com"],
+        "fingerprint": ["Oops - We didn't find your site"],
+        "vulnerable": True,
+    },
+    "Tilda": {
+        "cname": ["tilda.ws"],
+        "fingerprint": ["Please renew your subscription"],
+        "vulnerable": False,
+    },
+    "UserVoice": {
+        "cname": ["uservoice.com"],
+        "fingerprint": ["This UserVoice subdomain is currently available"],
+        "vulnerable": True,
+    },
+    "Vend": {
+        "cname": ["vendhq.com"],
+        "fingerprint": ["Looks like you've traveled too far into cyberspace"],
+        "vulnerable": True,
+    },
+    "Webflow": {
+        "cname": ["proxy.webflow.com", "proxy-ssl.webflow.com"],
+        "fingerprint": ["The page you are looking for doesn't exist or has been moved"],
+        "vulnerable": False,  # generic text; confirm CNAME + manual
+    },
+    "Wishpond": {
+        "cname": ["wishpond.com"],
+        "fingerprint": ["https://www.wishpond.com/404?"],
+        "vulnerable": True,
+    },
+    "Wufoo": {
+        "cname": ["wufoo.com"],
+        "fingerprint": ["Profile not found"],
+        "vulnerable": True,
+    },
+    "Worksites": {
+        "cname": ["worksites.net"],
+        "fingerprint": ["Hello! Sorry, but the website you&rsquo;re looking for doesn&rsquo;t exist"],
+        "vulnerable": True,
+    },
+    "Kinsta": {
+        "cname": ["kinsta.cloud"],
+        "fingerprint": ["No Site For Domain"],
+        "vulnerable": True,
+    },
+    "Uptimerobot": {
+        "cname": ["stats.uptimerobot.com"],
+        "fingerprint": ["page not found", "This public status page"],
+        "vulnerable": False,
+    },
 }
 
 

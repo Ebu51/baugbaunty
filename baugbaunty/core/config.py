@@ -59,13 +59,32 @@ DEFAULTS: dict[str, Any] = {
         "seeds": {"favicon": True},  # robots/sitemap/favicon seeding
         "vhost": {"wordlist": "", "max_hosts": 300},
         "params": {"wordlist": "", "chunk_size": 25, "max_params": 500},
-        "webchecks": {"checks": ["cors", "openredirect", "reflection"], "max_targets": 300},
-        "cvecheck": {"extra": ""},
+        "webchecks": {
+            "checks": ["cors", "openredirect", "reflection", "crlf", "hostheader", "ssrf"],
+            "max_targets": 300,
+            "ssrf_canary": "",  # your OOB collaborator/interactsh domain; blank disables SSRF
+        },
+        "cvecheck": {"extra": "", "online": False},  # online = OSV enrichment
         "githubdork": {"token": "", "terms": [], "max_results": 20},
         "screenshot": {},
-        "content": {"wordlist": "", "extensions": ["", "/"], "status_allow": [200, 204, 301, 302, 307, 401, 403, 405]},
+        "content": {
+            "wordlist": "",
+            "extensions": ["", "/"],
+            "permute_ext": [],  # e.g. [".php", ".bak", ".json", ".old", ".zip"]
+            "recurse": False,
+            "max_depth": 1,
+            "status_allow": [200, 204, 301, 302, 307, 401, 403, 405],
+        },
         "ports": {"top_ports": 100, "use_external": True},
-        "nuclei": {"severity": ["low", "medium", "high", "critical"], "rate_limit": 150},
+        "nuclei": {
+            "severity": ["low", "medium", "high", "critical"],
+            "rate_limit": 150,
+            "templates": "",          # path to a custom template dir
+            "tags": [],               # e.g. ["cve", "exposure"]
+            "exclude_severity": [],
+            "update": False,          # run -update-templates before scanning
+            "extra_args": [],
+        },
     },
     "notifications": {
         "enabled": False,

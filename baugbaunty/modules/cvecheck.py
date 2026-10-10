@@ -15,9 +15,16 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from .base import Context, Module
+
+# Products OSV can enrich (npm ecosystem), keyed by our detected name.
+_OSV_NPM = {"jquery", "bootstrap", "lodash", "angular", "vue", "react", "moment",
+            "handlebars", "backbone", "ember", "dojo", "knockout", "axios"}
 
 _VER_TOKEN = re.compile(r"([A-Za-z][A-Za-z0-9+_\-]*?)[/ ]v?(\d+(?:\.\d+){1,3})")
 
@@ -89,7 +96,9 @@ class CveCheckModule(Module):
             return {"services": 0, "matches": 0}
 
         rules = _RULES + self._load_extra(ctx)
-        ctx.log.info(f"[cvecheck] correlating {len(services)} service(s) against {len(rules)} rules")
+        online = bool(ctx.config.get("modules.cvecheck.online", False))
+        ctx.log.info(f"[cvecheck] correlating {len(services)} service(s) against {len(rules)} rules"
+                     + (" + OSV online" if online else ""))
         matches = 0
 
         for svc in services:
@@ -98,6 +107,8 @@ class CveCheckModule(Module):
                 continue
             products = self._products(svc)
             for name, version, raw in products:
+                if online and name in _OSV_NPM:
+                    matches += self._osv_enrich(ctx, url, name, ".".join(map(str, version)), raw)
                 # Version disclosure is itself a (low-noise) info finding.
                 ctx.store.add_finding(
                     target=url, module="cvecheck",
@@ -119,6 +130,38 @@ class CveCheckModule(Module):
 
         ctx.log.success(f"[cvecheck] {matches} CVE lead(s)")
         return {"services": len(services), "matches": matches}
+
+    def _osv_enrich(self, ctx: Context, url: str, name: str, version: str, raw: str) -> int:
+        """Query OSV.dev for known vulns affecting a detected library version."""
+
+        payload = json.dumps({
+            "version": version,
+            "package": {"name": name, "ecosystem": "npm"},
+        }).encode()
+        try:
+            req = urllib.request.Request(
+                "https://api.osv.dev/v1/query", data=payload,
+                headers={"Content-Type": "application/json", "User-Agent": ctx.http.user_agent},
+            )
+            with urllib.request.urlopen(req, timeout=20, context=ssl.create_default_context()) as resp:
+                data = json.loads(resp.read().decode("utf-8", errors="replace"))
+        except (urllib.error.URLError, ssl.SSLError, OSError, json.JSONDecodeError) as e:
+            ctx.log.warn(f"[cvecheck] OSV query failed for {name}@{version}: {e}")
+            return 0
+        vulns = data.get("vulns", []) or []
+        for v in vulns:
+            vid = v.get("id", "")
+            sev = _osv_severity(v)
+            ctx.store.add_finding(
+                target=url, module="cvecheck",
+                name=f"{name} {version}: {v.get('summary', vid)[:120]} [{vid}]",
+                severity=sev,
+                evidence=f"OSV reports {vid} affects {raw}",
+                cve=[a for a in v.get("aliases", []) if a.startswith("CVE")],
+                source="osv",
+            )
+            ctx.log.warn(f"[cvecheck] OSV {vid} affects {raw}")
+        return len(vulns)
 
     def _products(self, svc: dict) -> list[tuple[str, tuple[int, ...], str]]:
         blobs = [svc.get("server") or ""]
@@ -147,3 +190,12 @@ def _safe(pred, version: tuple[int, ...]) -> bool:
         return bool(pred(version))
     except Exception:
         return False
+
+
+def _osv_severity(vuln: dict) -> str:
+    """Best-effort severity from an OSV record's database_specific field."""
+
+    ds = (vuln.get("database_specific") or {}).get("severity", "")
+    mapping = {"CRITICAL": "critical", "HIGH": "high", "MODERATE": "medium",
+               "MEDIUM": "medium", "LOW": "low"}
+    return mapping.get(str(ds).upper(), "medium")
