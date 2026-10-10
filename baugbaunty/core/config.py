@@ -45,6 +45,12 @@ DEFAULTS: dict[str, Any] = {
         "extra_headers": {},
         "proxy": "",  # e.g. http://127.0.0.1:8080 to route through Burp/mitmproxy
     },
+    # Credentials for authenticated scanning (test as a logged-in user).
+    "auth": {
+        "bearer": "",   # -> Authorization: Bearer <token>
+        "cookie": "",   # -> Cookie: <value>
+        "headers": {},  # arbitrary extra headers (e.g. {"X-Api-Key": "..."})
+    },
     "modules": {
         "subdomains": {"sources": ["crtsh"], "use_external": True},
         "dns": {
@@ -59,6 +65,9 @@ DEFAULTS: dict[str, Any] = {
         "seeds": {"favicon": True},  # robots/sitemap/favicon seeding
         "waf": {},
         "graphql": {},
+        "ratecal": {"max_requests": 15, "concurrency": 10},
+        "openapi": {},
+        "buckets": {"keywords": [], "providers": ["s3", "gcs", "azure"], "max_candidates": 200},
         "vhost": {"wordlist": "", "max_hosts": 300},
         "params": {"wordlist": "", "chunk_size": 25, "max_params": 500},
         "webchecks": {

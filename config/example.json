@@ -28,6 +28,11 @@
     "extra_headers": {},
     "proxy": ""
   },
+  "auth": {
+    "bearer": "",
+    "cookie": "",
+    "headers": {}
+  },
   "modules": {
     "subdomains": { "sources": ["crtsh"], "use_external": true },
     "dns": {
@@ -49,6 +54,9 @@
     },
     "cvecheck": { "extra": "", "online": false },
     "githubdork": { "token": "", "terms": [], "max_results": 20 },
+    "ratecal": { "max_requests": 15, "concurrency": 10 },
+    "openapi": {},
+    "buckets": { "keywords": [], "providers": ["s3", "gcs", "azure"], "max_candidates": 200 },
     "screenshot": {},
     "content": {
       "wordlist": "",
@@ -80,6 +88,6 @@
   },
   "output": {
     "dir": "output",
-    "formats": ["json", "markdown", "html"]
+    "formats": ["json", "markdown", "html", "pdf"]
   }
 }
