@@ -13,6 +13,7 @@ richer behaviour can still shell out to specialised external tools.
 from __future__ import annotations
 
 import gzip
+import http.client
 import ssl
 import time
 import urllib.error
@@ -142,7 +143,8 @@ class HttpClient:
                     elapsed=time.monotonic() - start,
                     final_url=url,
                 )
-            except (urllib.error.URLError, ssl.SSLError, OSError, ValueError) as e:
+            except (urllib.error.URLError, ssl.SSLError, OSError, ValueError,
+                    http.client.HTTPException) as e:
                 last_err = str(getattr(e, "reason", e))
                 if attempt < self.max_retries:
                     time.sleep(0.5 * (2**attempt))

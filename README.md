@@ -102,9 +102,11 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
 | `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (40+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
+| `waf`        | ✅ active | Fingerprints the WAF in front of each service (Cloudflare, Akamai, Imperva, AWS, F5, ModSecurity…) | built-in |
 | `seeds`      | ✅ active | Seeds paths from robots.txt & sitemap.xml; captures favicon hashes (mmh3/md5) | built-in |
 | `vhost`      | ✅ active | Virtual-host discovery — finds sites served on an in-scope IP via the Host header | built-in |
 | `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
+| `graphql`    | ✅ active | Finds GraphQL endpoints and flags when **introspection** is enabled (schema disclosure) | built-in |
 | `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration, **recursion** and **extension permutation**; flags sensitive paths | built-in |
 | `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
 | `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection / **CRLF** / **host-header injection** / **SSRF canary** checks | built-in |
@@ -213,9 +215,9 @@ baugbaunty/
 │   └── logging.py     tiny structured logger
 ├── modules/         # one file per pipeline phase
 │   ├── subdomains.py  wayback.py  dns.py  takeover.py
-│   ├── probe.py  seeds.py  vhost.py  jsintel.py  content.py
-│   ├── params.py  webchecks.py  cvecheck.py  githubdork.py
-│   ├── screenshot.py  ports.py  nuclei.py
+│   ├── probe.py  waf.py  seeds.py  vhost.py  jsintel.py
+│   ├── graphql.py  content.py  params.py  webchecks.py
+│   ├── cvecheck.py  githubdork.py  screenshot.py  ports.py  nuclei.py
 │   └── fingerprint.py tech detection signatures
 ├── integrations/    # safe argv-only wrappers for external CLIs
 ├── report/          # JSON / Markdown / HTML renderers

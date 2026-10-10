@@ -57,6 +57,8 @@ DEFAULTS: dict[str, Any] = {
         "wayback": {"sources": ["wayback", "otx"], "max_urls": 5000},
         "jsintel": {"max_files": 200, "scan_secrets": True},
         "seeds": {"favicon": True},  # robots/sitemap/favicon seeding
+        "waf": {},
+        "graphql": {},
         "vhost": {"wordlist": "", "max_hosts": 300},
         "params": {"wordlist": "", "chunk_size": 25, "max_params": 500},
         "webchecks": {

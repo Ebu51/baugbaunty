@@ -20,6 +20,7 @@ from .modules.content import ContentModule
 from .modules.cvecheck import CveCheckModule
 from .modules.dns import DnsModule
 from .modules.githubdork import GithubDorkModule
+from .modules.graphql import GraphqlModule
 from .modules.jsintel import JsIntelModule
 from .modules.nuclei import NucleiModule
 from .modules.params import ParamsModule
@@ -30,6 +31,7 @@ from .modules.seeds import SeedsModule
 from .modules.subdomains import SubdomainModule
 from .modules.takeover import TakeoverModule
 from .modules.vhost import VhostModule
+from .modules.waf import WafModule
 from .modules.wayback import WaybackModule
 from .modules.webchecks import WebChecksModule
 from .report import generate_reports, generate_submissions
@@ -52,9 +54,11 @@ PHASES = [
     "dns",         # resolution + wildcard filtering (non-intrusive)
     "takeover",    # subdomain takeover detection (active)
     "probe",       # live HTTP probing + fingerprint (active)
+    "waf",         # WAF detection (active)
     "seeds",       # robots/sitemap/favicon seeding (active)
     "vhost",       # virtual-host discovery (active)
     "jsintel",     # JS endpoint + secret extraction (active)
+    "graphql",     # GraphQL discovery + introspection (active)
     "content",     # content discovery (active)
     "params",      # hidden parameter discovery (active)
     "webchecks",   # CORS / open redirect / reflection (active)
@@ -65,7 +69,7 @@ PHASES = [
 ]
 # Phases that send traffic to the target (require authorization).
 ACTIVE_PHASES = {
-    "takeover", "probe", "seeds", "vhost", "jsintel",
+    "takeover", "probe", "waf", "seeds", "vhost", "jsintel", "graphql",
     "content", "params", "webchecks", "screenshot", "ports", "nuclei",
 }
 
@@ -232,9 +236,11 @@ def cmd_run(args: argparse.Namespace) -> int:
             "githubdork": lambda: GithubDorkModule(domains).run(ctx),
             "takeover": lambda: TakeoverModule().run(ctx),
             "probe": lambda: ProbeModule().run(ctx),
+            "waf": lambda: WafModule().run(ctx),
             "seeds": lambda: SeedsModule().run(ctx),
             "vhost": lambda: VhostModule().run(ctx),
             "jsintel": lambda: JsIntelModule().run(ctx),
+            "graphql": lambda: GraphqlModule().run(ctx),
             "content": lambda: ContentModule().run(ctx),
             "params": lambda: ParamsModule().run(ctx),
             "webchecks": lambda: WebChecksModule().run(ctx),
