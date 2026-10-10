@@ -317,6 +317,12 @@ def _report_diff(diff: dict, log, first_run: bool) -> None:
                  f"({f.get('target')})")
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from .mcp_server import main as mcp_main
+
+    return mcp_main()
+
+
 def cmd_import(args: argparse.Namespace) -> int:
     import json as _json
 
@@ -392,6 +398,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     pt = sub.add_parser("tools", help="show which external tools are installed")
     pt.set_defaults(func=cmd_tools)
+
+    pmcp = sub.add_parser("mcp", help="run the MCP server (stdio) for use with Claude")
+    pmcp.set_defaults(func=cmd_mcp)
 
     pimp = sub.add_parser("import", help="build a config from a HackerOne/Bugcrowd scope file")
     pimp.add_argument("-f", "--file", required=True, help="scope file (JSON or plain list)")

@@ -19,6 +19,7 @@ dev = ["pytest>=7.0"]
 
 [project.scripts]
 baugbaunty = "baugbaunty.cli:main"
+baugbaunty-mcp = "baugbaunty.mcp_server:main"
 
 [tool.setuptools.packages.find]
 include = ["baugbaunty*"]

@@ -249,6 +249,40 @@ pytest -q
 
 ---
 
+## Use with Claude (MCP server)
+
+baugbaunty ships a dependency-free **MCP server** so Claude (Claude Code or
+Claude Desktop) can drive the toolkit as tools — run recon and reason over
+findings conversationally, with the same scope, rate-limit and authorization
+guardrails. See [`CLAUDE.md`](CLAUDE.md) for the safe-use rules Claude follows.
+
+Start it manually with `baugbaunty mcp` (or `python -m baugbaunty mcp`); it
+speaks MCP over stdio.
+
+**Claude Code** — a project [`.mcp.json`](.mcp.json) is already included:
+
+```json
+{ "mcpServers": { "baugbaunty": { "command": "python", "args": ["-m", "baugbaunty", "mcp"] } } }
+```
+
+**Claude Desktop** — add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "baugbaunty": { "command": "python", "args": ["-m", "baugbaunty", "mcp"] }
+  }
+}
+```
+
+Tools exposed: `scope_check`, `import_scope`, `tools_status` (safe/planning);
+`summary`, `list_findings`, `list_assets` (read an existing results DB); and
+`run` (executes phases — active phases are refused unless the config is
+`authorized`, exactly as on the CLI). Example asks:
+
+> "Import this HackerOne scope, check example.com is in scope, then run the
+> passive phases and show me the findings by severity."
+
 ## Proxy / Burp passthrough
 
 Route every request through Burp or mitmproxy for manual inspection and replay:
