@@ -92,11 +92,44 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | Phase        | Traffic to target? | What it does | Powered by |
 |--------------|:---:|--------------|------------|
 | `subdomains` | ❌ passive | Certificate-transparency (crt.sh) + aggregated passive sources | built-in / `subfinder` |
+| `wayback`    | ❌ passive | Historical URL mining from Wayback Machine + AlienVault OTX; flags interesting archived URLs | built-in |
+| `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
+| `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (14+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
+| `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
 | `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration; flags sensitive paths | built-in |
 | `ports`      | ✅ active | Open-port discovery | built-in / `naabu` |
 | `nuclei`     | ✅ active | Template-based vulnerability checks | `nuclei` |
 | _report_     | — | JSON + Markdown + self-contained HTML | always runs |
+
+¹ DNS resolution queries public/authoritative resolvers, not the target's web
+app, so it is treated as non-intrusive recon and doesn't require the auth gate.
+
+### Continuous monitoring (`monitor`)
+
+`monitor` runs the pipeline, then reports (and optionally pushes a notification
+for) everything **new since the last run** — perfect for a cron job that alerts
+you the moment a target exposes a new subdomain or service:
+
+```bash
+# cheap change-detection every few hours
+baugbaunty monitor -c acme.json --authorize --phases subdomains dns probe
+```
+
+Configure alerts under `notifications` in your config (Slack / Discord /
+Telegram / generic webhook), with a `min_severity` filter:
+
+```json
+"notifications": {
+  "enabled": true,
+  "slack_webhook": "https://hooks.slack.com/services/...",
+  "telegram_bot_token": "", "telegram_chat_id": "",
+  "min_severity": "medium"
+}
+```
+
+A per-program run checkpoint is stored in the results DB, so diffs are accurate
+across runs and the first run never spams you with everything at once.
 
 Everything discovered is stored in a per-program SQLite database
 (`output/<program>.sqlite`) so runs are **resumable, de-duplicated and
@@ -116,7 +149,8 @@ baugbaunty/
 │   ├── store.py       SQLite result store (assets/services/findings)
 │   └── logging.py     tiny structured logger
 ├── modules/         # one file per pipeline phase
-│   ├── subdomains.py  probe.py  content.py  ports.py  nuclei.py
+│   ├── subdomains.py  wayback.py  dns.py  takeover.py
+│   ├── probe.py  jsintel.py  content.py  ports.py  nuclei.py
 │   └── fingerprint.py tech detection signatures
 ├── integrations/    # safe argv-only wrappers for external CLIs
 ├── report/          # JSON / Markdown / HTML renderers
@@ -157,14 +191,20 @@ pytest -q
 
 ## Roadmap
 
-Planned next modules (the structure is ready for them):
+Shipped (Tier 1): DNS resolution + wildcard filtering, subdomain-takeover
+detection, historical-URL mining, JS endpoint/secret extraction, and
+diff/monitor mode with notifications.
 
-- `dns` bruteforce + wildcard detection (via `dnsx`)
-- JS endpoint/secret extraction from live services
-- Parameter discovery and reflected-value detection
-- Screenshotting live hosts for triage
-- Program-import helpers (HackerOne / Bugcrowd scope pulls)
-- Diff mode: alert on new assets/services since the last run
+Planned next (Tier 2 — the structure is ready for them):
+
+- Parameter discovery (hidden GET/POST params)
+- Open-redirect / CORS / reflection detection (safe, non-exploit)
+- Virtual-host discovery
+- robots/sitemap seeding + favicon-hash tech correlation
+- Burp/mitmproxy passthrough
+
+Tier 3: HackerOne/Bugcrowd scope import, screenshotting, GitHub dorking,
+CVE correlation, scan profiles.
 
 ---
 

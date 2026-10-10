@@ -46,9 +46,27 @@ DEFAULTS: dict[str, Any] = {
     },
     "modules": {
         "subdomains": {"sources": ["crtsh"], "use_external": True},
+        "dns": {
+            "use_external": True,
+            "detect_wildcard": True,
+            "filter_wildcard": True,
+            "wildcard_test_count": 3,
+        },
+        "takeover": {"extra": ""},  # path to a JSON file of extra fingerprints
+        "wayback": {"sources": ["wayback", "otx"], "max_urls": 5000},
+        "jsintel": {"max_files": 200, "scan_secrets": True},
         "content": {"wordlist": "", "extensions": ["", "/"], "status_allow": [200, 204, 301, 302, 307, 401, 403, 405]},
         "ports": {"top_ports": 100, "use_external": True},
         "nuclei": {"severity": ["low", "medium", "high", "critical"], "rate_limit": 150},
+    },
+    "notifications": {
+        "enabled": False,
+        "slack_webhook": "",
+        "discord_webhook": "",
+        "telegram_bot_token": "",
+        "telegram_chat_id": "",
+        "generic_webhook": "",
+        "min_severity": "medium",  # only alert on findings at/above this severity
     },
     "output": {
         "dir": "output",

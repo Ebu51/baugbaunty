@@ -4,20 +4,26 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
 from .core.config import DEFAULTS, Config
 from .core.logging import configure
+from .core.notify import Notifier
 from .core.scope import Scope
 from .core.store import Store
 from .integrations import external
 from .modules.base import Context
 from .modules.content import ContentModule
+from .modules.dns import DnsModule
+from .modules.jsintel import JsIntelModule
 from .modules.nuclei import NucleiModule
 from .modules.ports import PortsModule
 from .modules.probe import ProbeModule
 from .modules.subdomains import SubdomainModule
+from .modules.takeover import TakeoverModule
+from .modules.wayback import WaybackModule
 from .report import generate_reports
 
 BANNER = r"""
@@ -31,8 +37,19 @@ BANNER = r"""
 """.format(ver=__version__)
 
 # Ordered phases of the default pipeline.
-PHASES = ["subdomains", "probe", "content", "ports", "nuclei"]
-ACTIVE_PHASES = {"probe", "content", "ports", "nuclei"}  # send traffic to target
+PHASES = [
+    "subdomains",  # passive OSINT
+    "wayback",     # passive archive mining
+    "dns",         # resolution + wildcard filtering (non-intrusive)
+    "takeover",    # subdomain takeover detection (active)
+    "probe",       # live HTTP probing + fingerprint (active)
+    "jsintel",     # JS endpoint + secret extraction (active)
+    "content",     # content discovery (active)
+    "ports",       # port scanning (active)
+    "nuclei",      # template vuln scan (active)
+]
+# Phases that send traffic to the target (require authorization).
+ACTIVE_PHASES = {"takeover", "probe", "jsintel", "content", "ports", "nuclei"}
 
 
 def _build_context(cfg: Config, log) -> tuple[Context, Store]:
@@ -153,6 +170,8 @@ def cmd_run(args: argparse.Namespace) -> int:
              f"{cfg.get('limits.per_host_rps')} req/s per host")
 
     ctx, store = _build_context(cfg, log)
+    # Remember the previous run's checkpoint so we can diff/notify new results.
+    prev_run = float(store.get_meta("last_run_ts", "0") or 0)
     try:
         # Seed in-scope root domains as assets.
         for rule in cfg.get("scope.include", []):
@@ -160,18 +179,21 @@ def cmd_run(args: argparse.Namespace) -> int:
             store.add_asset(root, "domain", source="scope", in_scope=scope.is_allowed(root))
 
         domains = [r.lstrip("*.") for r in cfg.get("scope.include", [])]
+        dispatch = {
+            "subdomains": lambda: SubdomainModule(domains).run(ctx),
+            "wayback": lambda: WaybackModule(domains).run(ctx),
+            "dns": lambda: DnsModule().run(ctx),
+            "takeover": lambda: TakeoverModule().run(ctx),
+            "probe": lambda: ProbeModule().run(ctx),
+            "jsintel": lambda: JsIntelModule().run(ctx),
+            "content": lambda: ContentModule().run(ctx),
+            "ports": lambda: PortsModule().run(ctx),
+            "nuclei": lambda: NucleiModule().run(ctx),
+        }
         results: dict[str, dict] = {}
-
-        if "subdomains" in phases:
-            results["subdomains"] = SubdomainModule(domains).run(ctx)
-        if "probe" in phases:
-            results["probe"] = ProbeModule().run(ctx)
-        if "content" in phases:
-            results["content"] = ContentModule().run(ctx)
-        if "ports" in phases:
-            results["ports"] = PortsModule().run(ctx)
-        if "nuclei" in phases:
-            results["nuclei"] = NucleiModule().run(ctx)
+        for phase in PHASES:  # run in canonical order regardless of arg order
+            if phase in phases:
+                results[phase] = dispatch[phase]()
 
         # Always produce a report at the end of a run.
         reports = generate_reports(store, cfg, cfg.get("output.dir", "output"))
@@ -182,9 +204,44 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
         for r in reports:
             log.success(f"Report: {r}")
+
+        # Diff vs the previous run + notifications (monitor mode).
+        diff = store.new_since(prev_run)
+        _report_diff(diff, log, first_run=prev_run == 0)
+        notifier = Notifier.from_config(cfg.get("notifications", {}))
+        notifier.log = log
+        if notifier.enabled and prev_run > 0:
+            notifier.send_diff(cfg.get("program.name", "engagement"), diff)
+        store.set_meta("last_run_ts", str(time.time()))
     finally:
         store.close()
     return 0
+
+
+def _report_diff(diff: dict, log, first_run: bool) -> None:
+    new_assets = diff.get("assets", [])
+    new_services = diff.get("services", [])
+    new_findings = diff.get("findings", [])
+    if first_run:
+        return  # nothing to compare against on the first run
+    if not (new_assets or new_services or new_findings):
+        log.info("[diff] no new assets, services or findings since last run")
+        return
+    log.success(
+        f"[diff] NEW since last run: {len(new_assets)} assets, "
+        f"{len(new_services)} services, {len(new_findings)} findings"
+    )
+    for f in new_findings[:20]:
+        log.warn(f"[diff]  + [{f.get('severity','').upper()}] {f.get('name')} "
+                 f"({f.get('target')})")
+
+
+def cmd_monitor(args: argparse.Namespace) -> int:
+    # Monitor is a thin wrapper over run: cheaper default phases for change
+    # detection, and it leans on run's built-in diff + notifications.
+    if not args.phases:
+        args.phases = ["subdomains", "dns", "probe"]
+    return cmd_run(args)
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -243,6 +300,22 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--authorize", action="store_true",
                     help="confirm you are authorized to test this scope")
     pr.set_defaults(func=cmd_run)
+
+    pm = sub.add_parser(
+        "monitor",
+        help="run the pipeline and report/notify what is NEW since last run "
+             "(ideal for cron/scheduled continuous recon)",
+    )
+    pm.add_argument("-c", "--config", help="config file (json/yaml)")
+    pm.add_argument("-d", "--domain", action="append", help="add an in-scope domain")
+    pm.add_argument("-n", "--name", help="program name override")
+    pm.add_argument("--phases", nargs="+", metavar="PHASE",
+                    help=f"subset of: {', '.join(PHASES)} "
+                         "(default: subdomains dns probe for cheap change detection)")
+    pm.add_argument("--rps", type=float, help="global requests/sec override")
+    pm.add_argument("--authorize", action="store_true",
+                    help="confirm you are authorized to test this scope")
+    pm.set_defaults(func=cmd_monitor)
 
     prep = sub.add_parser("report", help="regenerate reports from a results DB")
     prep.add_argument("-c", "--config", help="config file")

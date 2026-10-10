@@ -29,6 +29,15 @@
   },
   "modules": {
     "subdomains": { "sources": ["crtsh"], "use_external": true },
+    "dns": {
+      "use_external": true,
+      "detect_wildcard": true,
+      "filter_wildcard": true,
+      "wildcard_test_count": 3
+    },
+    "takeover": { "extra": "" },
+    "wayback": { "sources": ["wayback", "otx"], "max_urls": 5000 },
+    "jsintel": { "max_files": 200, "scan_secrets": true },
     "content": {
       "wordlist": "",
       "extensions": ["", "/"],
@@ -36,6 +45,15 @@
     },
     "ports": { "top_ports": 100, "use_external": true },
     "nuclei": { "severity": ["low", "medium", "high", "critical"], "rate_limit": 150 }
+  },
+  "notifications": {
+    "enabled": false,
+    "slack_webhook": "",
+    "discord_webhook": "",
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "generic_webhook": "",
+    "min_severity": "medium"
   },
   "output": {
     "dir": "output",

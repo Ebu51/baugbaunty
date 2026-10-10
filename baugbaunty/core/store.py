@@ -50,6 +50,10 @@ CREATE TABLE IF NOT EXISTS findings (
     UNIQUE(target, module, name)
 );
 CREATE INDEX IF NOT EXISTS idx_findings_sev ON findings(severity);
+CREATE TABLE IF NOT EXISTS run_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
 """
 
 
@@ -97,6 +101,27 @@ class Store:
                      source=COALESCE(NULLIF(excluded.source,''), assets.source),
                      in_scope=excluded.in_scope""",
                 (value, kind, source, int(in_scope), time.time(), json.dumps(data)),
+            )
+            self.conn.commit()
+
+    def update_asset_data(self, value: str, kind: str, **data: Any) -> None:
+        """Merge extra attributes into an existing asset's JSON data blob."""
+
+        assert self._lock is not None
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT data FROM assets WHERE value=? AND kind=?", (value, kind)
+            ).fetchone()
+            current: dict[str, Any] = {}
+            if row and row["data"]:
+                try:
+                    current = json.loads(row["data"])
+                except json.JSONDecodeError:
+                    current = {}
+            current.update(data)
+            self.conn.execute(
+                "UPDATE assets SET data=? WHERE value=? AND kind=?",
+                (json.dumps(current), value, kind),
             )
             self.conn.commit()
 
@@ -175,3 +200,36 @@ class Store:
     def bulk_add_assets(self, rows: Iterable[tuple[str, str, str, bool]]) -> None:
         for value, kind, source, in_scope in rows:
             self.add_asset(value, kind, source, in_scope)
+
+    # --- run metadata & diff/monitor -------------------------------------
+    def get_meta(self, key: str, default: str | None = None) -> str | None:
+        row = self.conn.execute(
+            "SELECT value FROM run_meta WHERE key=?", (key,)
+        ).fetchone()
+        return row["value"] if row else default
+
+    def set_meta(self, key: str, value: str) -> None:
+        assert self._lock is not None
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO run_meta(key, value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+            self.conn.commit()
+
+    def new_since(self, ts: float) -> dict[str, list[dict[str, Any]]]:
+        """Return assets/services/findings first seen at or after ``ts``."""
+
+        def rows(sql: str) -> list[dict[str, Any]]:
+            return [dict(r) for r in self.conn.execute(sql, (ts,))]
+
+        return {
+            "assets": rows("SELECT * FROM assets WHERE first_seen >= ? ORDER BY value"),
+            "services": rows("SELECT * FROM services WHERE first_seen >= ? ORDER BY url"),
+            "findings": rows(
+                "SELECT * FROM findings WHERE first_seen >= ? "
+                "ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+                "WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+            ),
+        }
