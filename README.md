@@ -1,5 +1,7 @@
 # baugbaunty
 
+[![CI](https://github.com/Ebu51/baugbaunty/actions/workflows/ci.yml/badge.svg)](https://github.com/Ebu51/baugbaunty/actions/workflows/ci.yml)
+
 **Scope-first bug bounty reconnaissance toolkit for _authorized_ security testing.**
 
 A modular recon + light-testing framework built the way a professional bounty
