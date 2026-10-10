@@ -16,12 +16,16 @@ from .core.store import Store
 from .integrations import external
 from .modules.base import Context
 from .integrations import programs
+from .modules.asn import AsnModule
 from .modules.buckets import BucketsModule
+from .modules.cluster import ClusterModule
 from .modules.content import ContentModule
 from .modules.crawl import CrawlModule
 from .modules.cvecheck import CveCheckModule
 from .modules.dns import DnsModule
+from .modules.dnsbrute import DnsBruteModule
 from .modules.githubdork import GithubDorkModule
+from .modules.secheaders import SecHeadersModule
 from .modules.graphql import GraphqlModule
 from .modules.jsintel import JsIntelModule
 from .modules.nuclei import NucleiModule
@@ -54,15 +58,18 @@ BANNER = r"""
 # Ordered phases of the default pipeline.
 PHASES = [
     "subdomains",  # passive OSINT
+    "asn",         # ASN/org -> CIDR expansion (third-party, passive)
     "wayback",     # passive archive mining
     "githubdork",  # passive GitHub leak search
     "buckets",     # cloud storage bucket enumeration (third-party, passive)
+    "dnsbrute",    # active DNS brute-force + permutation (resolution only)
     "dns",         # resolution + wildcard filtering (non-intrusive)
     "takeover",    # subdomain takeover detection (active)
     "probe",       # live HTTP probing + fingerprint (active)
     "waf",         # WAF detection (active)
     "ratecal",     # rate-limit calibration (active)
     "seeds",       # robots/sitemap/favicon seeding (active)
+    "secheaders",  # CSP + cookie security analysis (active)
     "vhost",       # virtual-host discovery (active)
     "jsintel",     # JS endpoint + secret extraction (active)
     "graphql",     # GraphQL discovery + introspection (active)
@@ -70,6 +77,7 @@ PHASES = [
     "crawl",       # in-scope web crawler / spider (active)
     "content",     # content discovery (active)
     "urltriage",   # gf-style URL prioritisation (analysis, no traffic)
+    "cluster",     # response clustering (analysis, no traffic)
     "params",      # hidden parameter discovery (active)
     "webchecks",   # CORS / open redirect / reflection (active)
     "cvecheck",    # version -> known-CVE correlation (analysis, no traffic)
@@ -79,8 +87,9 @@ PHASES = [
 ]
 # Phases that send traffic to the target (require authorization).
 ACTIVE_PHASES = {
-    "takeover", "probe", "waf", "ratecal", "seeds", "vhost", "jsintel", "graphql",
-    "openapi", "crawl", "content", "params", "webchecks", "screenshot", "ports", "nuclei",
+    "takeover", "probe", "waf", "ratecal", "seeds", "secheaders", "vhost", "jsintel",
+    "graphql", "openapi", "crawl", "content", "params", "webchecks", "screenshot",
+    "ports", "nuclei",
 }
 
 # Preset scan profiles: politeness + which phases to run by default.
@@ -243,13 +252,16 @@ def cmd_run(args: argparse.Namespace) -> int:
             "subdomains": lambda: SubdomainModule(domains).run(ctx),
             "wayback": lambda: WaybackModule(domains).run(ctx),
             "dns": lambda: DnsModule().run(ctx),
+            "asn": lambda: AsnModule().run(ctx),
             "githubdork": lambda: GithubDorkModule(domains).run(ctx),
             "buckets": lambda: BucketsModule().run(ctx),
+            "dnsbrute": lambda: DnsBruteModule(domains).run(ctx),
             "takeover": lambda: TakeoverModule().run(ctx),
             "probe": lambda: ProbeModule().run(ctx),
             "waf": lambda: WafModule().run(ctx),
             "ratecal": lambda: RateCalModule().run(ctx),
             "seeds": lambda: SeedsModule().run(ctx),
+            "secheaders": lambda: SecHeadersModule().run(ctx),
             "vhost": lambda: VhostModule().run(ctx),
             "jsintel": lambda: JsIntelModule().run(ctx),
             "graphql": lambda: GraphqlModule().run(ctx),
@@ -257,6 +269,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             "crawl": lambda: CrawlModule().run(ctx),
             "content": lambda: ContentModule().run(ctx),
             "urltriage": lambda: UrlTriageModule().run(ctx),
+            "cluster": lambda: ClusterModule().run(ctx),
             "params": lambda: ParamsModule().run(ctx),
             "webchecks": lambda: WebChecksModule().run(ctx),
             "cvecheck": lambda: CveCheckModule().run(ctx),
@@ -432,6 +445,49 @@ def cmd_submission(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    import json as _json
+
+    log = configure(args.log_level)
+    cfg = Config.load(args.config) if args.config else Config()
+    out_dir = Path(cfg.get("output.dir", "output"))
+    program = cfg.get("program.name", "engagement")
+    db_path = Path(args.db) if args.db else out_dir / f"{program}.sqlite"
+    if not db_path.exists():
+        log.error(f"No database at {db_path}. Run a scan first.")
+        return 1
+    out_dir.mkdir(parents=True, exist_ok=True)
+    store = Store.open(db_path)
+    what = set(args.what)
+    written: list[Path] = []
+    try:
+        assets = store.assets()
+        if {"all", "subdomains"} & what:
+            vals = sorted({a["value"] for a in assets if a["kind"] in ("subdomain", "domain")})
+            p = out_dir / f"{program}-subdomains.txt"
+            p.write_text("\n".join(vals) + ("\n" if vals else ""), encoding="utf-8")
+            written.append(p)
+        if {"all", "urls"} & what:
+            vals = sorted({a["value"] for a in assets if a["kind"] in ("url", "endpoint")})
+            p = out_dir / f"{program}-urls.txt"
+            p.write_text("\n".join(vals) + ("\n" if vals else ""), encoding="utf-8")
+            written.append(p)
+        if {"all", "services"} & what:
+            vals = sorted({s["url"] for s in store.services()})
+            p = out_dir / f"{program}-services.txt"
+            p.write_text("\n".join(vals) + ("\n" if vals else ""), encoding="utf-8")
+            written.append(p)
+        if {"all", "findings"} & what:
+            p = out_dir / f"{program}-findings.json"
+            p.write_text(_json.dumps(store.findings(), indent=2, default=str), encoding="utf-8")
+            written.append(p)
+    finally:
+        store.close()
+    for w in written:
+        log.success(f"Exported: {w}")
+    return 0
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     log = configure(args.log_level)
     cfg = Config.load(args.config)
@@ -532,6 +588,14 @@ def build_parser() -> argparse.ArgumentParser:
                       choices=["generic", "hackerone", "bugcrowd"])
     psub.add_argument("--format", default="markdown", choices=["markdown", "json", "pdf"])
     psub.set_defaults(func=cmd_submission)
+
+    pexp = sub.add_parser("export",
+                          help="export assets/urls/services/findings as plain lists for tool chaining")
+    pexp.add_argument("-c", "--config", help="config file")
+    pexp.add_argument("--db", help="path to the sqlite results db")
+    pexp.add_argument("--what", nargs="+", default=["all"],
+                      choices=["all", "subdomains", "urls", "services", "findings"])
+    pexp.set_defaults(func=cmd_export)
 
     prep = sub.add_parser("report", help="regenerate reports from a results DB")
     prep.add_argument("-c", "--config", help="config file")

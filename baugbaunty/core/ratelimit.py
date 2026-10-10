@@ -84,6 +84,17 @@ class RateLimiter:
                 bucket.acquire()
         self._global.acquire()
 
+    def set_per_host_rate(self, rate: float) -> None:
+        """Adjust the per-host budget at runtime (e.g. after rate-limit
+        calibration). Existing host buckets are reset so they pick up the new
+        rate on next use."""
+
+        if rate <= 0:
+            return
+        with self._lock:
+            self._per_host_rps = rate
+            self._hosts.clear()
+
 
 class ConcurrencyGuard:
     """A simple bounded-concurrency semaphore usable as a context manager."""

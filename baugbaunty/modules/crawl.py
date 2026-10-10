@@ -51,6 +51,21 @@ class CrawlModule(Module):
         max_pages = int(ctx.config.get("modules.crawl.max_pages", 200))
         max_depth = int(ctx.config.get("modules.crawl.max_depth", 3))
 
+        # Optional headless rendering for JS/SPA pages (katana -headless style).
+        headless = bool(ctx.config.get("modules.crawl.headless", False))
+        browser = page = pw = None
+        if headless:
+            if _playwright_available():
+                from playwright.sync_api import sync_playwright
+                pw = sync_playwright().start()
+                browser = pw.chromium.launch(args=["--no-sandbox", "--ignore-certificate-errors"])
+                page = browser.new_context(ignore_https_errors=True,
+                                           user_agent=ctx.http.user_agent).new_page()
+                ctx.log.info("[crawl] headless rendering enabled")
+            else:
+                ctx.log.warn("[crawl] headless requested but Playwright unavailable — "
+                             "falling back to static crawl")
+
         visited: set[str] = set()
         queued: set[str] = set()
         queue: deque[tuple[str, int]] = deque()
@@ -68,15 +83,20 @@ class CrawlModule(Module):
             if url in visited or not ctx.scope.is_allowed(url):
                 continue
             visited.add(url)
-            resp = ctx.http.get(url)
-            if not resp.ok or resp.status == 0:
-                continue
-            ctype = resp.header("content-type")
-            if "html" not in ctype and ctype:
-                continue
+            if page is not None:
+                html, base, ctype = self._render(ctx, url, page)
+                if html is None:
+                    continue
+            else:
+                resp = ctx.http.get(url)
+                if not resp.ok or resp.status == 0:
+                    continue
+                ctype = resp.header("content-type")
+                if "html" not in ctype and ctype:
+                    continue
+                html = resp.text(limit=1_000_000)
+                base = resp.final_url or url
             pages += 1
-            html = resp.text(limit=1_000_000)
-            base = resp.final_url or url
 
             # 1) forms
             forms_found += self._harvest_forms(ctx, base, html)
@@ -103,10 +123,30 @@ class CrawlModule(Module):
                     queue.append((full, depth + 1))
                     queued.add(full)
 
+        if browser is not None:
+            try:
+                browser.close()
+                pw.stop()
+            except Exception:  # pragma: no cover
+                pass
+
         ctx.log.success(
             f"[crawl] {pages} page(s), {urls_found} in-scope URL(s), {forms_found} form(s)"
         )
         return {"pages": pages, "urls": urls_found, "forms": forms_found}
+
+    def _render(self, ctx: Context, url: str, page):
+        """Render a page headlessly; return (html, final_url, content_type)."""
+        from urllib.parse import urlparse
+
+        ctx.limiter.acquire(urlparse(url).hostname or "")
+        timeout = int(float(ctx.config.get("limits.timeout", 10)) * 1000)
+        try:
+            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+            return page.content(), page.url, "text/html"
+        except Exception as e:  # pragma: no cover - env dependent
+            ctx.log.debug(f"[crawl] headless render failed {url}: {e}")
+            return None, url, ""
 
     def _harvest_forms(self, ctx: Context, base: str, html: str) -> int:
         n = 0
@@ -130,3 +170,12 @@ class CrawlModule(Module):
                 )
             n += 1
         return n
+
+
+def _playwright_available() -> bool:
+    try:
+        import playwright.sync_api  # noqa: F401
+
+        return True
+    except Exception:
+        return False
