@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "baugbaunty"
+version = "0.1.0"
+description = "Scope-first bug bounty reconnaissance toolkit for authorized testing"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "baugbaunty" }]
+keywords = ["bug-bounty", "security", "reconnaissance", "pentest"]
+dependencies = []  # core runs on the standard library alone
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+baugbaunty = "baugbaunty.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["baugbaunty*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

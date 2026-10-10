@@ -1,0 +1,131 @@
+"""Configuration loading and the runtime context shared across modules.
+
+Config can be YAML (if PyYAML is installed) or JSON. A small, dependency-free
+JSON path is always available so the toolkit runs out of the box.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import Any
+
+try:  # optional dependency
+    import yaml  # type: ignore
+
+    _HAVE_YAML = True
+except Exception:  # pragma: no cover - env dependent
+    _HAVE_YAML = False
+
+
+DEFAULTS: dict[str, Any] = {
+    "program": {
+        "name": "unnamed-program",
+        "platform": "",  # hackerone | bugcrowd | intigriti | private
+        "authorized": False,  # must be flipped to True to run active modules
+    },
+    "scope": {
+        "include": [],  # e.g. ["*.example.com", "api.example.com"]
+        "exclude": [],  # e.g. ["blog.example.com", "*.staging.example.com"]
+    },
+    "limits": {
+        "global_rps": 10.0,
+        "per_host_rps": 5.0,
+        "concurrency": 20,
+        "timeout": 10.0,
+        "max_retries": 2,
+    },
+    "http": {
+        # A transparent, honest UA so target teams can identify your traffic.
+        "user_agent": "baugbaunty/0.1 (authorized-security-testing)",
+        "verify_tls": True,
+        "follow_redirects": True,
+        "extra_headers": {},
+    },
+    "modules": {
+        "subdomains": {"sources": ["crtsh"], "use_external": True},
+        "content": {"wordlist": "", "extensions": ["", "/"], "status_allow": [200, 204, 301, 302, 307, 401, 403, 405]},
+        "ports": {"top_ports": 100, "use_external": True},
+        "nuclei": {"severity": ["low", "medium", "high", "critical"], "rate_limit": 150},
+    },
+    "output": {
+        "dir": "output",
+        "formats": ["json", "markdown"],
+    },
+}
+
+
+@dataclass
+class Config:
+    data: dict[str, Any] = field(default_factory=lambda: _deep_copy(DEFAULTS))
+    source_path: Path | None = None
+
+    # --- convenience accessors -------------------------------------------
+    def get(self, path: str, default: Any = None) -> Any:
+        node: Any = self.data
+        for part in path.split("."):
+            if isinstance(node, dict) and part in node:
+                node = node[part]
+            else:
+                return default
+        return node
+
+    def set(self, path: str, value: Any) -> None:
+        parts = path.split(".")
+        node = self.data
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+
+    @property
+    def authorized(self) -> bool:
+        return bool(self.get("program.authorized", False))
+
+    def to_json(self) -> str:
+        return json.dumps(self.data, indent=2, sort_keys=False)
+
+    @classmethod
+    def load(cls, path: str | os.PathLike[str] | None) -> "Config":
+        cfg = cls()
+        if path is None:
+            return cfg
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"config not found: {p}")
+        raw = p.read_text(encoding="utf-8")
+        loaded = _parse_config_text(raw, p)
+        cfg.data = _deep_merge(_deep_copy(DEFAULTS), loaded)
+        cfg.source_path = p
+        return cfg
+
+
+def _parse_config_text(raw: str, path: Path) -> dict[str, Any]:
+    suffix = path.suffix.lower()
+    if suffix in (".yaml", ".yml"):
+        if not _HAVE_YAML:
+            raise RuntimeError(
+                f"{path} is YAML but PyYAML is not installed. "
+                "Install it (pip install pyyaml) or use a .json config."
+            )
+        return yaml.safe_load(raw) or {}
+    if suffix == ".json":
+        return json.loads(raw) if raw.strip() else {}
+    # Unknown suffix: try YAML first (superset of JSON), then JSON.
+    if _HAVE_YAML:
+        return yaml.safe_load(raw) or {}
+    return json.loads(raw) if raw.strip() else {}
+
+
+def _deep_copy(d: dict[str, Any]) -> dict[str, Any]:
+    return json.loads(json.dumps(d))
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            base[key] = _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base

@@ -1,0 +1,12 @@
+# Core has ZERO required dependencies — it runs on the Python standard library.
+# The following are OPTIONAL and unlock extra features:
+
+# YAML config files (JSON config works without this)
+pyyaml>=6.0
+
+# Running the test suite
+pytest>=7.0
+
+# --- External CLI tools (install separately, not via pip) -------------------
+# subfinder, httpx, naabu, nuclei, dnsx  -> https://github.com/projectdiscovery
+# nmap                                   -> https://nmap.org

@@ -1,0 +1,44 @@
+{
+  "program": {
+    "name": "example-program",
+    "platform": "hackerone",
+    "authorized": false
+  },
+  "scope": {
+    "include": [
+      "*.example.com",
+      "api.example.com"
+    ],
+    "exclude": [
+      "*.staging.example.com",
+      "blog.example.com"
+    ]
+  },
+  "limits": {
+    "global_rps": 10.0,
+    "per_host_rps": 5.0,
+    "concurrency": 20,
+    "timeout": 10.0,
+    "max_retries": 2
+  },
+  "http": {
+    "user_agent": "baugbaunty/0.1 (authorized-security-testing; you@example.com)",
+    "verify_tls": true,
+    "follow_redirects": true,
+    "extra_headers": {}
+  },
+  "modules": {
+    "subdomains": { "sources": ["crtsh"], "use_external": true },
+    "content": {
+      "wordlist": "",
+      "extensions": ["", "/"],
+      "status_allow": [200, 204, 301, 302, 307, 401, 403, 405]
+    },
+    "ports": { "top_ports": 100, "use_external": true },
+    "nuclei": { "severity": ["low", "medium", "high", "critical"], "rate_limit": 150 }
+  },
+  "output": {
+    "dir": "output",
+    "formats": ["json", "markdown", "html"]
+  }
+}

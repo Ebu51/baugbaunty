@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Tool output — scan results can contain sensitive target data, never commit them
+output/
+results/
+*.sqlite
+*.sqlite3
+*.db
+
+# Local secrets / API keys
+.env
+config/local.yaml
+config/*.local.yaml
+secrets.yaml
+
+# OS
+.DS_Store
+Thumbs.db
