@@ -43,6 +43,7 @@ DEFAULTS: dict[str, Any] = {
         "verify_tls": True,
         "follow_redirects": True,
         "extra_headers": {},
+        "proxy": "",  # e.g. http://127.0.0.1:8080 to route through Burp/mitmproxy
     },
     "modules": {
         "subdomains": {"sources": ["crtsh"], "use_external": True},
@@ -55,6 +56,10 @@ DEFAULTS: dict[str, Any] = {
         "takeover": {"extra": ""},  # path to a JSON file of extra fingerprints
         "wayback": {"sources": ["wayback", "otx"], "max_urls": 5000},
         "jsintel": {"max_files": 200, "scan_secrets": True},
+        "seeds": {"favicon": True},  # robots/sitemap/favicon seeding
+        "vhost": {"wordlist": "", "max_hosts": 300},
+        "params": {"wordlist": "", "chunk_size": 25, "max_params": 500},
+        "webchecks": {"checks": ["cors", "openredirect", "reflection"], "max_targets": 300},
         "content": {"wordlist": "", "extensions": ["", "/"], "status_allow": [200, 204, 301, 302, 307, 401, 403, 405]},
         "ports": {"top_ports": 100, "use_external": True},
         "nuclei": {"severity": ["low", "medium", "high", "critical"], "rate_limit": 150},

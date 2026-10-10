@@ -81,3 +81,39 @@ def test_wayback_interesting_detection():
 def test_takeover_fingerprints_present():
     assert "GitHub Pages" in _FINGERPRINTS
     assert _FINGERPRINTS["AWS/S3"]["vulnerable"] is True
+
+
+def test_webchecks_set_param_add_and_replace():
+    from baugbaunty.modules.webchecks import _set_param
+
+    # add a new param
+    out = _set_param("https://x.example.com/a", "next", "https://c/")
+    assert "next=https%3A%2F%2Fc%2F" in out
+    # replace an existing param, keep others
+    out2 = _set_param("https://x.example.com/a?id=1&next=old", "next", "NEW")
+    assert "next=NEW" in out2 and "id=1" in out2 and "old" not in out2
+
+
+def test_webchecks_redirect_param_list():
+    from baugbaunty.modules.webchecks import _REDIRECT_PARAMS
+
+    assert "next" in _REDIRECT_PARAMS
+    assert "redirect_uri" in _REDIRECT_PARAMS
+
+
+def test_seeds_robots_and_loc_regex():
+    from baugbaunty.modules.seeds import _ROBOTS_PATH_RE, _ROBOTS_SITEMAP_RE, _LOC_RE
+
+    robots = "User-agent: *\nDisallow: /admin\nAllow: /public\nSitemap: http://x/sm.xml"
+    assert "/admin" in _ROBOTS_PATH_RE.findall(robots)
+    assert "/public" in _ROBOTS_PATH_RE.findall(robots)
+    assert _ROBOTS_SITEMAP_RE.findall(robots) == ["http://x/sm.xml"]
+    assert _LOC_RE.findall("<url><loc>http://x/p</loc></url>") == ["http://x/p"]
+
+
+def test_httpclient_has_proxy_and_redirect_support():
+    import inspect
+    from baugbaunty.core.http import HttpClient
+
+    assert "proxy" in {f.name for f in __import__("dataclasses").fields(HttpClient)}
+    assert "follow_redirects" in inspect.signature(HttpClient.get).parameters

@@ -66,15 +66,22 @@ class HttpClient:
     max_retries: int = 2
     extra_headers: Mapping[str, str] = field(default_factory=dict)
     max_body: int = 2_000_000  # cap downloaded bytes per response (2 MB)
+    proxy: str = ""  # e.g. http://127.0.0.1:8080 to route through Burp/mitmproxy
 
-    def _opener(self) -> urllib.request.OpenerDirector:
+    def _opener(self, follow: bool | None = None) -> urllib.request.OpenerDirector:
+        if follow is None:
+            follow = self.follow_redirects
         handlers: list[urllib.request.BaseHandler] = []
         ctx = ssl.create_default_context()
         if not self.verify_tls:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
         handlers.append(urllib.request.HTTPSHandler(context=ctx))
-        if not self.follow_redirects:
+        if self.proxy:
+            handlers.append(
+                urllib.request.ProxyHandler({"http": self.proxy, "https": self.proxy})
+            )
+        if not follow:
             handlers.append(_NoRedirect())
         return urllib.request.build_opener(*handlers)
 
@@ -84,6 +91,7 @@ class HttpClient:
         url: str,
         headers: Mapping[str, str] | None = None,
         data: bytes | None = None,
+        follow_redirects: bool | None = None,
     ) -> Response:
         host = urlparse(url).hostname or ""
         # Hard scope gate: never send a packet to an out-of-scope host.
@@ -100,7 +108,7 @@ class HttpClient:
         if headers:
             req_headers.update(headers)
 
-        opener = self._opener()
+        opener = self._opener(follow_redirects)
         last_err: str | None = None
         for attempt in range(self.max_retries + 1):
             start = time.monotonic()
@@ -141,8 +149,13 @@ class HttpClient:
                     continue
         return Response(url=url, status=0, headers={}, error=last_err or "request failed")
 
-    def get(self, url: str, headers: Mapping[str, str] | None = None) -> Response:
-        return self.request("GET", url, headers=headers)
+    def get(
+        self,
+        url: str,
+        headers: Mapping[str, str] | None = None,
+        follow_redirects: bool | None = None,
+    ) -> Response:
+        return self.request("GET", url, headers=headers, follow_redirects=follow_redirects)
 
     def head(self, url: str, headers: Mapping[str, str] | None = None) -> Response:
         return self.request("HEAD", url, headers=headers)

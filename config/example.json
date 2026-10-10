@@ -25,7 +25,8 @@
     "user_agent": "baugbaunty/0.1 (authorized-security-testing; you@example.com)",
     "verify_tls": true,
     "follow_redirects": true,
-    "extra_headers": {}
+    "extra_headers": {},
+    "proxy": ""
   },
   "modules": {
     "subdomains": { "sources": ["crtsh"], "use_external": true },
@@ -38,6 +39,10 @@
     "takeover": { "extra": "" },
     "wayback": { "sources": ["wayback", "otx"], "max_urls": 5000 },
     "jsintel": { "max_files": 200, "scan_secrets": true },
+    "seeds": { "favicon": true },
+    "vhost": { "wordlist": "", "max_hosts": 300 },
+    "params": { "wordlist": "", "chunk_size": 25, "max_params": 500 },
+    "webchecks": { "checks": ["cors", "openredirect", "reflection"], "max_targets": 300 },
     "content": {
       "wordlist": "",
       "extensions": ["", "/"],

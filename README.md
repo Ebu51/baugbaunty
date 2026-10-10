@@ -96,8 +96,12 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | `dns`        | ❌ passive¹ | Resolve hosts, extract CNAMEs, detect & filter wildcard DNS | built-in / `dnsx` |
 | `takeover`   | ✅ active | Subdomain-takeover detection via CNAME + response fingerprints (14+ providers) | built-in |
 | `probe`      | ✅ active | Which hosts are live over HTTP(S); status, title, server, tech; passive security-header checks | built-in / `httpx` |
+| `seeds`      | ✅ active | Seeds paths from robots.txt & sitemap.xml; captures favicon hashes (mmh3/md5) | built-in |
+| `vhost`      | ✅ active | Virtual-host discovery — finds sites served on an in-scope IP via the Host header | built-in |
 | `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
 | `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration; flags sensitive paths | built-in |
+| `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
+| `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection (XSS-candidate) checks | built-in |
 | `ports`      | ✅ active | Open-port discovery | built-in / `naabu` |
 | `nuclei`     | ✅ active | Template-based vulnerability checks | `nuclei` |
 | _report_     | — | JSON + Markdown + self-contained HTML | always runs |
@@ -150,7 +154,8 @@ baugbaunty/
 │   └── logging.py     tiny structured logger
 ├── modules/         # one file per pipeline phase
 │   ├── subdomains.py  wayback.py  dns.py  takeover.py
-│   ├── probe.py  jsintel.py  content.py  ports.py  nuclei.py
+│   ├── probe.py  seeds.py  vhost.py  jsintel.py  content.py
+│   ├── params.py  webchecks.py  ports.py  nuclei.py
 │   └── fingerprint.py tech detection signatures
 ├── integrations/    # safe argv-only wrappers for external CLIs
 ├── report/          # JSON / Markdown / HTML renderers
@@ -189,22 +194,26 @@ pytest -q
 
 ---
 
+## Proxy / Burp passthrough
+
+Route every request through Burp or mitmproxy for manual inspection and replay:
+
+```json
+"http": { "proxy": "http://127.0.0.1:8080", "verify_tls": false }
+```
+
 ## Roadmap
 
 Shipped (Tier 1): DNS resolution + wildcard filtering, subdomain-takeover
-detection, historical-URL mining, JS endpoint/secret extraction, and
-diff/monitor mode with notifications.
+detection, historical-URL mining, JS endpoint/secret extraction, diff/monitor
+mode with notifications.
 
-Planned next (Tier 2 — the structure is ready for them):
+Shipped (Tier 2): hidden-parameter discovery, safe CORS/open-redirect/
+reflection checks, virtual-host discovery, robots/sitemap seeding +
+favicon-hash correlation, and Burp/mitmproxy passthrough.
 
-- Parameter discovery (hidden GET/POST params)
-- Open-redirect / CORS / reflection detection (safe, non-exploit)
-- Virtual-host discovery
-- robots/sitemap seeding + favicon-hash tech correlation
-- Burp/mitmproxy passthrough
-
-Tier 3: HackerOne/Bugcrowd scope import, screenshotting, GitHub dorking,
-CVE correlation, scan profiles.
+Planned next (Tier 3): HackerOne/Bugcrowd scope import, screenshotting,
+GitHub dorking, CVE correlation, scan profiles.
 
 ---
 

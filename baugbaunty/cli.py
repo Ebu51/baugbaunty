@@ -19,11 +19,15 @@ from .modules.content import ContentModule
 from .modules.dns import DnsModule
 from .modules.jsintel import JsIntelModule
 from .modules.nuclei import NucleiModule
+from .modules.params import ParamsModule
 from .modules.ports import PortsModule
 from .modules.probe import ProbeModule
+from .modules.seeds import SeedsModule
 from .modules.subdomains import SubdomainModule
 from .modules.takeover import TakeoverModule
+from .modules.vhost import VhostModule
 from .modules.wayback import WaybackModule
+from .modules.webchecks import WebChecksModule
 from .report import generate_reports
 
 BANNER = r"""
@@ -43,13 +47,20 @@ PHASES = [
     "dns",         # resolution + wildcard filtering (non-intrusive)
     "takeover",    # subdomain takeover detection (active)
     "probe",       # live HTTP probing + fingerprint (active)
+    "seeds",       # robots/sitemap/favicon seeding (active)
+    "vhost",       # virtual-host discovery (active)
     "jsintel",     # JS endpoint + secret extraction (active)
     "content",     # content discovery (active)
+    "params",      # hidden parameter discovery (active)
+    "webchecks",   # CORS / open redirect / reflection (active)
     "ports",       # port scanning (active)
     "nuclei",      # template vuln scan (active)
 ]
 # Phases that send traffic to the target (require authorization).
-ACTIVE_PHASES = {"takeover", "probe", "jsintel", "content", "ports", "nuclei"}
+ACTIVE_PHASES = {
+    "takeover", "probe", "seeds", "vhost", "jsintel",
+    "content", "params", "webchecks", "ports", "nuclei",
+}
 
 
 def _build_context(cfg: Config, log) -> tuple[Context, Store]:
@@ -185,8 +196,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             "dns": lambda: DnsModule().run(ctx),
             "takeover": lambda: TakeoverModule().run(ctx),
             "probe": lambda: ProbeModule().run(ctx),
+            "seeds": lambda: SeedsModule().run(ctx),
+            "vhost": lambda: VhostModule().run(ctx),
             "jsintel": lambda: JsIntelModule().run(ctx),
             "content": lambda: ContentModule().run(ctx),
+            "params": lambda: ParamsModule().run(ctx),
+            "webchecks": lambda: WebChecksModule().run(ctx),
             "ports": lambda: PortsModule().run(ctx),
             "nuclei": lambda: NucleiModule().run(ctx),
         }
