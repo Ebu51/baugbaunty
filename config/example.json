@@ -34,7 +34,12 @@
     "headers": {}
   },
   "modules": {
-    "subdomains": { "sources": ["crtsh"], "use_external": true },
+    "subdomains": {
+      "sources": ["crtsh", "hackertarget", "rapiddns", "anubis", "otx"],
+      "use_external": true
+    },
+    "crawl": { "max_pages": 200, "max_depth": 3 },
+    "urltriage": {},
     "dns": {
       "use_external": true,
       "detect_wildcard": true,

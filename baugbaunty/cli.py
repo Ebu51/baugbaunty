@@ -18,6 +18,7 @@ from .modules.base import Context
 from .integrations import programs
 from .modules.buckets import BucketsModule
 from .modules.content import ContentModule
+from .modules.crawl import CrawlModule
 from .modules.cvecheck import CveCheckModule
 from .modules.dns import DnsModule
 from .modules.githubdork import GithubDorkModule
@@ -33,6 +34,7 @@ from .modules.screenshot import ScreenshotModule
 from .modules.seeds import SeedsModule
 from .modules.subdomains import SubdomainModule
 from .modules.takeover import TakeoverModule
+from .modules.urltriage import UrlTriageModule
 from .modules.vhost import VhostModule
 from .modules.waf import WafModule
 from .modules.wayback import WaybackModule
@@ -65,7 +67,9 @@ PHASES = [
     "jsintel",     # JS endpoint + secret extraction (active)
     "graphql",     # GraphQL discovery + introspection (active)
     "openapi",     # OpenAPI/Swagger spec discovery (active)
+    "crawl",       # in-scope web crawler / spider (active)
     "content",     # content discovery (active)
+    "urltriage",   # gf-style URL prioritisation (analysis, no traffic)
     "params",      # hidden parameter discovery (active)
     "webchecks",   # CORS / open redirect / reflection (active)
     "cvecheck",    # version -> known-CVE correlation (analysis, no traffic)
@@ -76,7 +80,7 @@ PHASES = [
 # Phases that send traffic to the target (require authorization).
 ACTIVE_PHASES = {
     "takeover", "probe", "waf", "ratecal", "seeds", "vhost", "jsintel", "graphql",
-    "openapi", "content", "params", "webchecks", "screenshot", "ports", "nuclei",
+    "openapi", "crawl", "content", "params", "webchecks", "screenshot", "ports", "nuclei",
 }
 
 # Preset scan profiles: politeness + which phases to run by default.
@@ -250,7 +254,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             "jsintel": lambda: JsIntelModule().run(ctx),
             "graphql": lambda: GraphqlModule().run(ctx),
             "openapi": lambda: OpenApiModule().run(ctx),
+            "crawl": lambda: CrawlModule().run(ctx),
             "content": lambda: ContentModule().run(ctx),
+            "urltriage": lambda: UrlTriageModule().run(ctx),
             "params": lambda: ParamsModule().run(ctx),
             "webchecks": lambda: WebChecksModule().run(ctx),
             "cvecheck": lambda: CveCheckModule().run(ctx),
@@ -266,6 +272,12 @@ def cmd_run(args: argparse.Namespace) -> int:
             t0 = time.time()
             results[phase] = dispatch[phase]()
             durations[phase] = time.time() - t0
+
+        # Recursive discovery: feed newly found in-scope hosts back through
+        # resolution, probing and crawling until stable (bbot-style).
+        rounds = getattr(args, "recursive", 0) or 0
+        if rounds and any(p in ordered for p in ("probe", "crawl", "jsintel", "openapi")):
+            _recursive_expand(ctx, rounds, log)
 
         # Always produce a report at the end of a run.
         reports = generate_reports(store, cfg, cfg.get("output.dir", "output"))
@@ -284,6 +296,32 @@ def cmd_run(args: argparse.Namespace) -> int:
     finally:
         store.close()
     return 0
+
+
+def _recursive_expand(ctx, rounds: int, log) -> None:
+    """Iteratively resolve + probe + crawl hosts discovered mid-run."""
+
+    for r in range(1, rounds + 1):
+        probed = {s.get("host") for s in ctx.store.services()}
+        candidates = [
+            a["value"] for a in ctx.store.assets()
+            if a["kind"] in ("subdomain", "domain")
+            and ctx.scope.is_allowed(a["value"])
+            and a["value"] not in probed
+        ]
+        if not candidates:
+            log.info(f"[recursive] round {r}: no new in-scope hosts — done")
+            break
+        log.info(f"[recursive] round {r}: expanding {len(candidates)} new host(s)")
+        before_urls = {s["url"] for s in ctx.store.services()}
+        DnsModule(hosts=candidates).run(ctx)
+        ProbeModule(hosts=candidates).run(ctx)
+        new_urls = [s["url"] for s in ctx.store.services() if s["url"] not in before_urls]
+        if new_urls:
+            CrawlModule(services=new_urls).run(ctx)
+        else:
+            log.info(f"[recursive] round {r}: no new live services — done")
+            break
 
 
 def _print_summary(log, results: dict, durations: dict, store) -> None:
@@ -460,6 +498,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help=f"subset of: {', '.join(PHASES)}")
     pr.add_argument("--rps", type=float, help="global requests/sec override")
     pr.add_argument("--profile", choices=list(PROFILES), help="preset scan profile")
+    pr.add_argument("--recursive", type=int, default=0, metavar="ROUNDS",
+                    help="feed newly discovered in-scope hosts back through "
+                         "dns/probe/crawl for up to ROUNDS iterations")
     pr.add_argument("--authorize", action="store_true",
                     help="confirm you are authorized to test this scope")
     pr.set_defaults(func=cmd_run)

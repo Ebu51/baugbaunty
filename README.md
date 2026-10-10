@@ -96,7 +96,7 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 
 | Phase        | Traffic to target? | What it does | Powered by |
 |--------------|:---:|--------------|------------|
-| `subdomains` | ❌ passive | Certificate-transparency (crt.sh) + aggregated passive sources | built-in / `subfinder` |
+| `subdomains` | ❌ passive | Certificate-transparency (crt.sh) + passive-DNS sources (HackerTarget, RapidDNS, Anubis, OTX) + `subfinder` | built-in / `subfinder` |
 | `wayback`    | ❌ passive | Historical URL mining from Wayback Machine + AlienVault OTX; flags interesting archived URLs | built-in |
 | `githubdork` | ❌ passive | Searches GitHub code for leaked references to the target (repo+path leads, no secret values) | built-in (token) |
 | `buckets`    | ❌ passive | Enumerates S3/GCS/Azure buckets from program keywords; flags publicly listable ones | built-in |
@@ -110,7 +110,9 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 | `jsintel`    | ✅ active | Extracts endpoints & hard-coded secrets (AWS/GCP/Slack/Stripe/JWT…) from live JavaScript | built-in |
 | `graphql`    | ✅ active | Finds GraphQL endpoints and flags when **introspection** is enabled (schema disclosure) | built-in |
 | `openapi`    | ✅ active | Finds OpenAPI/Swagger specs and seeds every documented operation & parameter | built-in |
+| `crawl`      | ✅ active | In-scope spider: follows links, harvests URLs, parameters, forms and new subdomains | built-in |
 | `content`    | ✅ active | Directory/endpoint discovery with soft-404 calibration, **recursion** and **extension permutation**; flags sensitive paths | built-in |
+| `urltriage`  | ❌ passive² | gf-style: tags the URL corpus by likely vuln class (SSRF/XSS/SQLi/LFI/redirect/IDOR/SSTI/CMDi) | built-in |
 | `params`     | ✅ active | Hidden GET-parameter discovery via reflection + response-diff | built-in |
 | `webchecks`  | ✅ active | Safe CORS / open-redirect / reflection / **CRLF** / **host-header injection** / **SSRF canary** checks | built-in |
 | `cvecheck`   | ❌ passive² | Correlates disclosed versions with a curated known-CVE ruleset + optional **OSV** online enrichment | built-in |
@@ -121,8 +123,18 @@ python -m baugbaunty run -d "*.example.com" --phases subdomains
 
 ¹ DNS resolution queries public/authoritative resolvers, not the target's web
 app, so it is treated as non-intrusive recon and doesn't require the auth gate.
-² `cvecheck` only analyses data already collected by `probe`; it sends no new
-traffic. `githubdork` queries GitHub, not the target.
+² `cvecheck` and `urltriage` only analyse data already collected; they send no
+new traffic. `githubdork` queries GitHub, not the target.
+
+### Recursive discovery
+
+Pass `--recursive N` to run to feed newly discovered in-scope hosts (found by
+the crawler, JS analysis or the API-spec parser) back through DNS resolution,
+probing and crawling, for up to N rounds — the attack surface expands itself:
+
+```bash
+baugbaunty run -c acme.json --authorize --recursive 2
+```
 
 ### Importing program scope
 
@@ -219,9 +231,9 @@ baugbaunty/
 ├── modules/         # one file per pipeline phase
 │   ├── subdomains.py  wayback.py  dns.py  takeover.py
 │   ├── probe.py  waf.py  ratecal.py  seeds.py  vhost.py  jsintel.py
-│   ├── graphql.py  openapi.py  buckets.py  content.py  params.py
-│   ├── webchecks.py  cvecheck.py  githubdork.py  screenshot.py
-│   ├── ports.py  nuclei.py
+│   ├── graphql.py  openapi.py  crawl.py  content.py  urltriage.py
+│   ├── buckets.py  params.py  webchecks.py  cvecheck.py  githubdork.py
+│   ├── screenshot.py  ports.py  nuclei.py
 │   └── fingerprint.py tech detection signatures
 ├── integrations/    # safe argv-only wrappers for external CLIs
 ├── report/          # JSON / Markdown / HTML renderers

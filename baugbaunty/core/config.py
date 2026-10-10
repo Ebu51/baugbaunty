@@ -52,7 +52,10 @@ DEFAULTS: dict[str, Any] = {
         "headers": {},  # arbitrary extra headers (e.g. {"X-Api-Key": "..."})
     },
     "modules": {
-        "subdomains": {"sources": ["crtsh"], "use_external": True},
+        "subdomains": {
+            "sources": ["crtsh", "hackertarget", "rapiddns", "anubis", "otx"],
+            "use_external": True,
+        },
         "dns": {
             "use_external": True,
             "detect_wildcard": True,
@@ -67,6 +70,8 @@ DEFAULTS: dict[str, Any] = {
         "graphql": {},
         "ratecal": {"max_requests": 15, "concurrency": 10},
         "openapi": {},
+        "crawl": {"max_pages": 200, "max_depth": 3},
+        "urltriage": {},
         "buckets": {"keywords": [], "providers": ["s3", "gcs", "azure"], "max_candidates": 200},
         "vhost": {"wordlist": "", "max_hosts": 300},
         "params": {"wordlist": "", "chunk_size": 25, "max_params": 500},
